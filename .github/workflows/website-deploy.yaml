@@ -1,68 +1,45 @@
 name: Deploy Hugo site to Amplify from S3
-
 on:
   push:
     branches: [ main ]
-
+    paths: [ website/** ]
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     permissions:
       id-token: write
       contents: read
-
-    env:
-      DART_SASS_VERSION: 1.85.0
-      GO_VERSION: 1.24.2
-      HUGO_VERSION: 0.120.3
-      HUGO_ENV: production
-      HUGO_ENABLEGITINFO: true
-      TZ: America/Los_Angeles
-      HUGO_CACHEDIR: ${{ github.workspace }}/.hugo
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Install Dart Sass
-        run: |
-          curl -LJO https://github.com/sass/dart-sass/releases/download/${DART_SASS_VERSION}/dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz
-          sudo tar -C /usr/local/bin -xf dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz
-          rm dart-sass-${DART_SASS_VERSION}-linux-x64.tar.gz
-          export PATH=/usr/local/bin/dart-sass:$PATH
-
+      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
       - name: Install Go
-        run: |
-          curl -LJO https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
-          sudo tar -C /usr/local -xf go${GO_VERSION}.linux-amd64.tar.gz
-          rm go${GO_VERSION}.linux-amd64.tar.gz
-          export PATH=/usr/local/go/bin:$PATH
-
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: test/hack/resource/go.mod
+          check-latest: true
+          cache-dependency-path: "test/hack/resource/go.sum"
       - name: Install Hugo
-        run: |
-          curl -LJO https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz
-          sudo tar -C /usr/local/bin -xf hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz
-          rm hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz
-          hugo version
-
-      - name: Install Node.js dependencies
-        run: |
-          [[ -f package-lock.json || -f npm-shrinkwrap.json ]] && npm ci --prefer-offline || echo "No dependencies"
-
+        uses: peaceiris/actions-hugo@16361eb4acea8698b220b76c0d4e84e1fd22c61d # v2.6.0
+        with:
+          hugo-version: '0.120.3'
+          extended: true
       - name: Build Hugo site
-        run: cd website && npm install && hugo --gc --minify
-
+        working-directory: website
+        env:
+          HUGO_ENV: production
+          HUGO_ENABLEGITINFO: true
+          TZ: America/Los_Angeles
+          HUGO_CACHEDIR: ${{ github.workspace }}/.hugo
+          NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
+        run: |
+          npm ci --prefer-offline
+          hugo --gc --minify
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
         with:
           role-to-assume: arn:aws:iam::${{ vars.ACCOUNT_ID }}:role/${{ vars.ACTIONS_ROLE_NAME }}
           aws-region: us-west-2
-
       - name: Sync Hugo build to S3
         run: aws s3 sync website/public/ s3://${{ vars.AMPLIFY_S3_BUCKET }} --delete
-
       - name: Trigger Amplify deployment from S3
         run: |
           aws amplify start-deployment \
