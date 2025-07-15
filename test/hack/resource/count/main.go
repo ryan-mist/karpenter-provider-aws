@@ -39,7 +39,7 @@ func main() {
 	ec2Client := ec2.NewFromConfig(cfg)
 	cloudFormationClient := cloudformation.NewFromConfig(cfg)
 	iamClient := iam.NewFromConfig(cfg)
-	metricsClient := metrics.Client(metrics.NewTimeStream(cfg))
+	metricsClient := metrics.Client(metrics.NewCloudWatch(cfg))
 
 	resourceTypes := []resourcetypes.Type{
 		resourcetypes.NewInstance(ec2Client),

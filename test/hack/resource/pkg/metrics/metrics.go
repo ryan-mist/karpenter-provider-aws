@@ -20,13 +20,16 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	cloudwatchtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/timestreamwrite"
 	timestreamtypes "github.com/aws/aws-sdk-go-v2/service/timestreamwrite/types"
 )
 
 const (
-	karpenterMetricRegion   = "us-east-2"
-	karpenterMetricDatabase = "karpenterTesting"
+	karpenterMetricRegion    = "us-east-2"
+	karpenterMetricDatabase  = "karpenterTesting"
+	karpenterMetricNamespace = "karpenterTesting"
 )
 
 type Client interface {
@@ -39,6 +42,37 @@ type TimeStream struct {
 
 func NewTimeStream(cfg aws.Config) *TimeStream {
 	return &TimeStream{timestreamClient: timestreamwrite.NewFromConfig(cfg, WithRegion(karpenterMetricRegion))}
+}
+
+type CloudWatch struct {
+	cloudwatchClient *cloudwatch.Client
+}
+
+func NewCloudWatch(cfg aws.Config) *CloudWatch {
+	return &CloudWatch{cloudwatchClient: cloudwatch.NewFromConfig(cfg, func(o *cloudwatch.Options) {
+		o.Region = karpenterMetricRegion
+	})}
+}
+
+func (c *CloudWatch) FireMetric(ctx context.Context, tableName string, name string, value float64, region string) error {
+	_, err := c.cloudwatchClient.PutMetricData(ctx, &cloudwatch.PutMetricDataInput{
+		Namespace: aws.String(karpenterMetricNamespace),
+		MetricData: []cloudwatchtypes.MetricDatum{
+			{
+				MetricName: aws.String(name),
+				Value:      aws.Float64(value),
+				Dimensions: []cloudwatchtypes.Dimension{
+					{
+						Name:  aws.String("region"),
+						Value: aws.String(region),
+					},
+				},
+				Timestamp: aws.Time(time.Now()),
+				Unit:      cloudwatchtypes.StandardUnitCount,
+			},
+		},
+	})
+	return err
 }
 
 func (t *TimeStream) FireMetric(ctx context.Context, tableName string, name string, value float64, region string) error {

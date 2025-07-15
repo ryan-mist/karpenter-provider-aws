@@ -59,7 +59,7 @@ func main() {
 	cloudFormationClient := cloudformation.NewFromConfig(cfg)
 	iamClient := iam.NewFromConfig(cfg)
 
-	metricsClient := metrics.Client(metrics.NewTimeStream(cfg))
+	metricsClient := metrics.Client(metrics.NewCloudWatch(cfg))
 
 	// These resources are intentionally ordered so that instances that are using ENIs
 	// will be cleaned before ENIs are attempted to be cleaned up. Likewise, instances and ENIs
