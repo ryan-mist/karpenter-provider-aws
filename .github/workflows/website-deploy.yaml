@@ -37,7 +37,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
         with:
           role-to-assume: arn:aws:iam::${{ vars.RELEASE_ACCOUNT_ID }}:role/${{ vars.RELEASE_ROLE_NAME }}
-          aws-region: us-west-2
+          aws-region: ${{ vars.AMPLIFY_REGION }}
       - name: Sync Hugo build to S3
         run: aws s3 sync website/public/ s3://${{ vars.AMPLIFY_S3_BUCKET }} --delete
       - name: Configure Amplify redirect rules
