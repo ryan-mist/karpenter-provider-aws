@@ -2,7 +2,7 @@ name: Cleanup PR Preview
 on:
   pull_request:
     types: [closed]
-    # paths: [ website/** ]
+    # paths: [ website/** ] a
 
 jobs:
   cleanup:
