@@ -2,7 +2,7 @@ name: Deploy Preview to Amplify
 on:
   pull_request:
     branches: [ main ]
-    # paths: [ website/** ]
+    paths: [ website/** ]
 
 jobs:
   preview:
