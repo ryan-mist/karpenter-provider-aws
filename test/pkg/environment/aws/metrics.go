@@ -21,7 +21,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	cloudwatchtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
-	"github.com/aws/aws-sdk-go-v2/service/timestreamwrite"
 	"github.com/samber/lo"
 
 	sdk "github.com/aws/karpenter-provider-aws/pkg/aws"
@@ -34,18 +33,8 @@ import (
 
 const (
 	metricsDefaultRegion = "us-east-2"
-	databaseName         = "karpenterTesting"
-	tableName            = "scaleTestDurations"
 	metricsNamespace     = "karpenterTesting"
 )
-
-type NoOpTimeStreamAPI struct {
-	sdk.TimestreamWriteAPI
-}
-
-func (o NoOpTimeStreamAPI) WriteRecords(_ context.Context, _ *timestreamwrite.WriteRecordsInput, _ ...func(*timestreamwrite.Options)) (*timestreamwrite.WriteRecordsOutput, error) {
-	return nil, nil
-}
 
 type NoOpCloudWatchAPI struct {
 	sdk.CloudWatchAPI

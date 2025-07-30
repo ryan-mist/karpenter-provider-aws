@@ -34,7 +34,6 @@ import (
 	servicesqs "github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/aws-sdk-go-v2/service/timestreamwrite"
 
 	. "github.com/onsi/ginkgo/v2"
 	"github.com/samber/lo"
@@ -70,7 +69,6 @@ type Environment struct {
 	IAMAPI        *iam.Client
 	FISAPI        *fis.Client
 	EKSAPI        *eks.Client
-	TimeStreamAPI sdk.TimestreamWriteAPI
 	CloudWatchAPI sdk.CloudWatchAPI
 
 	SQSProvider sqs.Provider
@@ -102,7 +100,6 @@ func NewEnvironment(t *testing.T) *Environment {
 		IAMAPI:        iam.NewFromConfig(cfg),
 		FISAPI:        fis.NewFromConfig(cfg),
 		EKSAPI:        eks.NewFromConfig(cfg),
-		TimeStreamAPI: GetTimeStreamAPI(env.Context, cfg),
 		CloudWatchAPI: GetCloudWatchAPI(env.Context, cfg),
 
 		ClusterName:     lo.Must(os.LookupEnv("CLUSTER_NAME")),
@@ -129,16 +126,6 @@ func NewEnvironment(t *testing.T) *Environment {
 		}
 	})
 	return awsEnv
-}
-
-func GetTimeStreamAPI(ctx context.Context, cfg aws.Config) sdk.TimestreamWriteAPI {
-	if lo.Must(env.GetBool("ENABLE_METRICS", false)) {
-		By("enabling metrics firing for this suite")
-		timeCfg := cfg.Copy()
-		timeCfg.Region = env.GetString("METRICS_REGION", metricsDefaultRegion)
-		return timestreamwrite.NewFromConfig(timeCfg)
-	}
-	return &NoOpTimeStreamAPI{}
 }
 
 func GetCloudWatchAPI(ctx context.Context, cfg aws.Config) sdk.CloudWatchAPI {
