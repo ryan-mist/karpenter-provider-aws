@@ -25,6 +25,7 @@ import (
 	"github.com/aws/amazon-vpc-resource-controller-k8s/apis/vpcresources/v1beta1"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	config "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -70,6 +71,7 @@ type Environment struct {
 	FISAPI        *fis.Client
 	EKSAPI        *eks.Client
 	TimeStreamAPI sdk.TimestreamWriteAPI
+	CloudWatchAPI sdk.CloudWatchAPI
 
 	SQSProvider sqs.Provider
 
@@ -101,6 +103,7 @@ func NewEnvironment(t *testing.T) *Environment {
 		FISAPI:        fis.NewFromConfig(cfg),
 		EKSAPI:        eks.NewFromConfig(cfg),
 		TimeStreamAPI: GetTimeStreamAPI(env.Context, cfg),
+		CloudWatchAPI: GetCloudWatchAPI(env.Context, cfg),
 
 		ClusterName:     lo.Must(os.LookupEnv("CLUSTER_NAME")),
 		ClusterEndpoint: lo.Must(os.LookupEnv("CLUSTER_ENDPOINT")),
@@ -136,6 +139,16 @@ func GetTimeStreamAPI(ctx context.Context, cfg aws.Config) sdk.TimestreamWriteAP
 		return timestreamwrite.NewFromConfig(timeCfg)
 	}
 	return &NoOpTimeStreamAPI{}
+}
+
+func GetCloudWatchAPI(ctx context.Context, cfg aws.Config) sdk.CloudWatchAPI {
+	if lo.Must(env.GetBool("ENABLE_METRICS", false)) {
+		By("enabling metrics firing for this suite")
+		timeCfg := cfg.Copy()
+		timeCfg.Region = env.GetString("METRICS_REGION", metricsDefaultRegion)
+		return cloudwatch.NewFromConfig(timeCfg)
+	}
+	return &NoOpCloudWatchAPI{}
 }
 
 func (env *Environment) DefaultEC2NodeClass() *v1.EC2NodeClass {

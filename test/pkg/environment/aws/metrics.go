@@ -16,12 +16,12 @@ package aws
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
+	cloudwatchtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 	"github.com/aws/aws-sdk-go-v2/service/timestreamwrite"
-	timestreamwritetypes "github.com/aws/aws-sdk-go-v2/service/timestreamwrite/types"
 	"github.com/samber/lo"
 
 	sdk "github.com/aws/karpenter-provider-aws/pkg/aws"
@@ -36,6 +36,7 @@ const (
 	metricsDefaultRegion = "us-east-2"
 	databaseName         = "karpenterTesting"
 	tableName            = "scaleTestDurations"
+	metricsNamespace     = "karpenterTesting"
 )
 
 type NoOpTimeStreamAPI struct {
@@ -43,6 +44,14 @@ type NoOpTimeStreamAPI struct {
 }
 
 func (o NoOpTimeStreamAPI) WriteRecords(_ context.Context, _ *timestreamwrite.WriteRecordsInput, _ ...func(*timestreamwrite.Options)) (*timestreamwrite.WriteRecordsOutput, error) {
+	return nil, nil
+}
+
+type NoOpCloudWatchAPI struct {
+	sdk.CloudWatchAPI
+}
+
+func (o NoOpCloudWatchAPI) PutMetricData(_ context.Context, _ *cloudwatch.PutMetricDataInput, _ ...func(*cloudwatch.Options)) (*cloudwatch.PutMetricDataOutput, error) {
 	return nil, nil
 }
 
@@ -97,20 +106,20 @@ func (env *Environment) MeasureDurationFor(f func(), eventType EventType, dimens
 
 func (env *Environment) ExpectMetric(name string, value float64, labels map[string]string) {
 	GinkgoHelper()
-	_, err := env.TimeStreamAPI.WriteRecords(env.Context, &timestreamwrite.WriteRecordsInput{
-		DatabaseName: aws.String(databaseName),
-		TableName:    aws.String(tableName),
-		Records: []timestreamwritetypes.Record{
+	_, err := env.CloudWatchAPI.PutMetricData(env.Context, &cloudwatch.PutMetricDataInput{
+		Namespace: aws.String(metricsNamespace),
+		MetricData: []cloudwatchtypes.MetricDatum{
 			{
-				MeasureName:  aws.String(name),
-				MeasureValue: aws.String(fmt.Sprintf("%f", value)),
-				Dimensions: lo.MapToSlice(labels, func(k, v string) timestreamwritetypes.Dimension {
-					return timestreamwritetypes.Dimension{
+				MetricName: aws.String(name),
+				Value:      aws.Float64(value),
+				Dimensions: lo.MapToSlice(labels, func(k, v string) cloudwatchtypes.Dimension {
+					return cloudwatchtypes.Dimension{
 						Name:  aws.String(k),
 						Value: aws.String(v),
 					}
 				}),
-				Time: aws.String(fmt.Sprintf("%d", time.Now().UnixMilli())),
+				Timestamp: aws.Time(time.Now()),
+				Unit:      cloudwatchtypes.StandardUnitSeconds,
 			},
 		},
 	})
