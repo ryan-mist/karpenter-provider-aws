@@ -1,12 +1,13 @@
 name: Deploy Website Preview to Amplify
 on:
-  pull_request:
+  pull_request_target:
     types: [ opened, synchronize, reopened ]
     branches: [ main ]
     paths: [ website/** ]
 jobs:
   preview:
     runs-on: ubuntu-latest
+    if: github.repository == 'aws/karpenter-provider-aws'
     permissions:
       id-token: write
       contents: read
