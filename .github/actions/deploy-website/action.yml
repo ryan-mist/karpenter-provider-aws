@@ -47,7 +47,7 @@ runs:
         TZ: America/Los_Angeles
         HUGO_CACHEDIR: ${{ github.workspace }}/.hugo
         NPM_CONFIG_CACHE: ${{ github.workspace }}/.npm
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request_target'
       run: |
         npm ci --prefer-offline
         hugo --gc --minify --buildFuture -b "${{ inputs.hugo-base-url }}"
