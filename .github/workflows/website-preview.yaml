@@ -11,6 +11,7 @@ jobs:
       id-token: write
       contents: read
       pull-requests: write
+      statuses: write
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +29,10 @@ jobs:
       - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
         with:
           ref: ${{ env.PR_COMMIT }}
+      - uses: ./.github/actions/commit-status/start
+        with:
+          name: "${{ github.workflow }} / ${{ github.job }} (pull_request_review)"
+          git_ref: ${{ env.PR_COMMIT }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
         with:
@@ -64,3 +69,8 @@ jobs:
             
             Built from commit \`${process.env.PR_COMMIT}\``
             })
+      - if: always()
+        uses: ./.github/actions/commit-status/end
+        with:
+          name: "${{ github.workflow }} / ${{ github.job }} (pull_request_review)"
+          git_ref: ${{ env.PR_COMMIT }}
