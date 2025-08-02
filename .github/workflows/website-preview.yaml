@@ -1,4 +1,4 @@
-name: Deploy Website Preview to Amplify
+name: WebsitePreviewTrigger
 on:
   workflow_run:
     workflows:
@@ -74,4 +74,3 @@ jobs:
         with:
           name: "${{ github.workflow }} / ${{ github.job }} (pull_request_review)"
           git_ref: ${{ env.PR_COMMIT }}
-
