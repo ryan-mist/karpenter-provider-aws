@@ -10,6 +10,8 @@ Technical designs are essential to building robust, intuitive, and performant pr
 
 Designs don’t have to be long or formal, and should match the scope of the problem they’re trying to solve.
 
+testing testing
+
 * Are there multiple potential solutions?
 * Will users need to be aware of the changes?
 * Would it be painful to discard a rejected implementation?
