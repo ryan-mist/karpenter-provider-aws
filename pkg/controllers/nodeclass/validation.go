@@ -134,6 +134,15 @@ func (v *Validation) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 		return reconcile.Result{}, reconcile.TerminalError(fmt.Errorf("validating tags, %w", err))
 	}
 
+	if _, exists := nodeClass.Annotations[v1.AnnotationValidationRefresh]; exists {
+		v.clearCacheEntries(nodeClass)
+		stored := nodeClass.DeepCopy()
+		delete(nodeClass.Annotations, v1.AnnotationValidationRefresh)
+		if err := v.kubeClient.Patch(ctx, nodeClass, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
+			return reconcile.Result{}, fmt.Errorf("updating nodeclass to remove validation refresh annotation, %w", err)
+		}
+	}
+
 	if val, ok := v.cache.Get(v.cacheKey(nodeClass, tags)); ok {
 		// We still update the status condition even if it's cached since we may have had a conflict error previously
 		if val == "" {
