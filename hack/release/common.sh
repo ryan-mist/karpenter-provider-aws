@@ -28,6 +28,16 @@ Helm Chart Version ${helm_chart_version}"
   build "${SNAPSHOT_REPO_ECR}" "${version}" "${helm_chart_version}" "${commit_sha}"
 }
 
+testPullThroughCache() {
+  local version
+
+  version="${1}"
+  echo "Testing pull through cache with Version: ${version}"
+
+  authenticateCachedRepo
+  pullImages "${version}"
+}
+
 release() {
   local commit_sha version helm_chart_version
 

@@ -17,4 +17,5 @@ if [[ "$(git status --porcelain)" != "" ]]; then
   exit 1
 fi
 
-release "${commit_sha}" "${git_tag#v}"
+# release "${commit_sha}" "${git_tag#v}"
+testPullThroughCache "${git_tag#v}"
