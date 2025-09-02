@@ -158,7 +158,7 @@ pullImages() {
   local repos=("controller" "karpenter" "karpenter-crd")
 
   for repo in "${repos[@]}"; do
-    docker pull "${CACHED_REPO_ECR}".dkr.ecr.us-east-1.amazonaws.com/"${CACHED_REPO_NAME}"/"${repo}":"${tag}"
+    docker pull "${CACHED_REPO_ECR}"/"${CACHED_REPO_NAME}"/"${repo}":"${tag}"
   done
 }
 
