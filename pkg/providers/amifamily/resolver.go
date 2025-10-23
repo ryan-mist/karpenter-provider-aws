@@ -172,9 +172,22 @@ func (r DefaultResolver) Resolve(nodeClass *v1.EC2NodeClass, nodeClaim *karpv1.N
 					}
 				}
 			}
+			var launchWithEFA bool
+			if nodeClass.EFAPolicy() != nil && *nodeClass.EFAPolicy() == v1.EfaPolicyEnabled {
+				launchWithEFA = true
+			} else if nodeClass.EFAPolicy() != nil && *nodeClass.EFAPolicy() == v1.EfaPolicyDisabled {
+				if lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA) {
+					// we should have scheduler think that the EFA disabled nodeclass has valid instance types to conform to EFA pod requests
+					// however, if the nodeclass is changed under our feet this might trigger so I should check this
+					panic("NodeClaim requests EFA resource while NodeClass has EFA disabled")
+				}
+				launchWithEFA = false
+			} else {
+				launchWithEFA = lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA)
+			}
 			return launchTemplateParams{
 				efaCount: lo.Ternary(
-					lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA),
+					launchWithEFA,
 					int(lo.ToPtr(it.Capacity[v1.ResourceEFA]).Value()),
 					0,
 				),

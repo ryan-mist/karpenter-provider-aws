@@ -155,7 +155,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1.EC2NodeClass
 		)
 		opts = append(opts, WithCapacityReservationDetails(id, crt))
 	}
-	if lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA) {
+	efaPolicyEnabled := nodeClass.EFAPolicy() != nil && *nodeClass.EFAPolicy() == v1.EfaPolicyEnabled
+	if lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA) || efaPolicyEnabled {
 		opts = append(opts, WithEFAEnabled())
 	}
 	return NewInstanceFromFleet(

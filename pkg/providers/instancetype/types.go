@@ -81,12 +81,13 @@ func (d *DefaultResolver) CacheKey(nodeClass NodeClass) string {
 	blockDeviceMappingsHash, _ := hashstructure.Hash(nodeClass.BlockDeviceMappings(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	capacityReservationHash, _ := hashstructure.Hash(nodeClass.CapacityReservations(), hashstructure.FormatV2, nil)
 	return fmt.Sprintf(
-		"%016x-%016x-%016x-%s-%s",
+		"%016x-%016x-%016x-%s-%s-%s",
 		kcHash,
 		blockDeviceMappingsHash,
 		capacityReservationHash,
 		lo.FromPtr((*string)(nodeClass.InstanceStorePolicy())),
 		nodeClass.AMIFamily(),
+		lo.FromPtr((*string)(nodeClass.EFAPolicy())),
 	)
 }
 

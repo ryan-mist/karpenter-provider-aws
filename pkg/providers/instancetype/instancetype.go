@@ -59,6 +59,7 @@ type NodeClass interface {
 	InstanceStorePolicy() *v1.InstanceStorePolicy
 	KubeletConfiguration() *v1.KubeletConfiguration
 	ZoneInfo() []v1.ZoneInfo
+	EFAPolicy() *string
 }
 
 type Provider interface {
@@ -203,6 +204,20 @@ func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name ec2
 	it := p.instanceTypesResolver.Resolve(ctx, info, p.instanceTypesOfferings[info.InstanceType].UnsortedList(), nodeClass)
 	if it == nil {
 		return nil, fmt.Errorf("failed to generate instance type %s", name)
+	}
+	if nodeClass.EFAPolicy() != nil {
+		if *nodeClass.EFAPolicy() == v1.EfaPolicyEnabled {
+			// this is to ensure if the nodeClass has EFAPolicyEnabled, we don't list non EFA-enabled instance types
+			if v, found := it.Capacity[v1.ResourceEFA]; !found || v == resource.MustParse("0") {
+				return nil, fmt.Errorf("efa policy enabled but instance type doesn't allow")
+			}
+		}
+		if *nodeClass.EFAPolicy() == v1.EfaPolicyDisabled {
+			// this is to ensure if the nodeClass has EFAPolicyDisabled, we don't advertize the instance as supporting EFA
+			if _, found := it.Capacity[v1.ResourceEFA]; found {
+				it.Capacity[v1.ResourceEFA] = resource.MustParse("0")
+			}
+		}
 	}
 	if cached, ok := p.discoveredCapacityCache.Get(discoveredCapacityCacheKey(it.Name, nodeClass)); ok {
 		it.Capacity[corev1.ResourceMemory] = cached.(resource.Quantity)

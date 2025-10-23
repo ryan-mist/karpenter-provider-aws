@@ -119,6 +119,10 @@ type EC2NodeClassSpec struct {
 	// InstanceStorePolicy specifies how to handle instance-store disks.
 	// +optional
 	InstanceStorePolicy *InstanceStorePolicy `json:"instanceStorePolicy,omitempty"`
+	// EFA Policy specifcies the advanced networking configurations for instances.
+	// +kubebuilder:validation:Enum:={enabled,disabled,implicit}
+	// +optional
+	EfaPolicy *string `json:"efaPolicy,omitempty"`
 	// DetailedMonitoring controls if detailed monitoring is enabled for instances that are launched
 	// +optional
 	DetailedMonitoring *bool `json:"detailedMonitoring,omitempty"`
@@ -532,6 +536,10 @@ func (in *EC2NodeClass) InstanceStorePolicy() *InstanceStorePolicy {
 
 func (in *EC2NodeClass) KubeletConfiguration() *KubeletConfiguration {
 	return in.Spec.Kubelet
+}
+
+func (in *EC2NodeClass) EFAPolicy() *string {
+	return in.Spec.EfaPolicy
 }
 
 // AMIFamily returns the family for a NodePool based on the following items, in order of precdence:

@@ -166,4 +166,9 @@ var (
 	NodeClassTagKey          = LabelNodeClass
 	LaunchTemplateNamePrefix = apis.Group
 	EKSClusterNameTagKey     = "eks:eks-cluster-name"
+
+	// TODO: might need to move?
+	EfaPolicyEnabled  = "enabled"
+	EfaPolicyDisabled = "disabled"
+	EfaPolicyImplicit = "implicit"
 )

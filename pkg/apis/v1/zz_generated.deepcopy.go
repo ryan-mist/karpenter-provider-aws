@@ -353,6 +353,11 @@ func (in *EC2NodeClassSpec) DeepCopyInto(out *EC2NodeClassSpec) {
 		*out = new(InstanceStorePolicy)
 		**out = **in
 	}
+	if in.EfaPolicy != nil {
+		in, out := &in.EfaPolicy, &out.EfaPolicy
+		*out = new(string)
+		**out = **in
+	}
 	if in.DetailedMonitoring != nil {
 		in, out := &in.DetailedMonitoring, &out.DetailedMonitoring
 		*out = new(bool)

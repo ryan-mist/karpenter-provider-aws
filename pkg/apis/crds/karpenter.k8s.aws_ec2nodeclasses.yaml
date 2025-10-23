@@ -299,6 +299,13 @@ spec:
                 detailedMonitoring:
                   description: DetailedMonitoring controls if detailed monitoring is enabled for instances that are launched
                   type: boolean
+                efaPolicy:
+                  description: EFA Policy specifcies the advanced networking configurations for instances.
+                  enum:
+                    - enabled
+                    - disabled
+                    - implicit
+                  type: string
                 instanceProfile:
                   description: |-
                     InstanceProfile is the AWS entity that instances use.
