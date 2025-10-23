@@ -122,7 +122,7 @@ type EC2NodeClassSpec struct {
 	// EFA Policy specifcies the advanced networking configurations for instances.
 	// +kubebuilder:validation:Enum:={enabled,disabled,implicit}
 	// +optional
-	EfaPolicy *string `json:"efaPolicy,omitempty"`
+	EfaPolicy *string `json:"efaPolicy,omitempty" hash:"ignore"`
 	// DetailedMonitoring controls if detailed monitoring is enabled for instances that are launched
 	// +optional
 	DetailedMonitoring *bool `json:"detailedMonitoring,omitempty"`

@@ -87,7 +87,7 @@ func (d *DefaultResolver) CacheKey(nodeClass NodeClass) string {
 		capacityReservationHash,
 		lo.FromPtr((*string)(nodeClass.InstanceStorePolicy())),
 		nodeClass.AMIFamily(),
-		lo.FromPtr((*string)(nodeClass.EFAPolicy())),
+		lo.FromPtr(nodeClass.EFAPolicy()),
 	)
 }
 

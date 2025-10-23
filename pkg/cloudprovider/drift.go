@@ -38,6 +38,7 @@ const (
 	SecurityGroupDrift       cloudprovider.DriftReason = "SecurityGroupDrift"
 	CapacityReservationDrift cloudprovider.DriftReason = "CapacityReservationDrift"
 	NodeClassDrift           cloudprovider.DriftReason = "NodeClassDrift"
+	EFADrift                 cloudprovider.DriftReason = "EFADrift"
 )
 
 func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodePool *karpv1.NodePool, nodeClass *v1.EC2NodeClass) (cloudprovider.DriftReason, error) {
@@ -65,10 +66,12 @@ func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv
 		return "", fmt.Errorf("calculating subnet drift, %w", err)
 	}
 	capacityReservationsDrifted := c.isCapacityReservationDrifted(instance, nodeClass)
+	efaDrifted := c.isEFADrifted(instance, nodeClass)
 	drifted := lo.FindOrElse([]cloudprovider.DriftReason{
 		securitygroupDrifted,
 		subnetDrifted,
 		capacityReservationsDrifted,
+		efaDrifted,
 	}, "", func(i cloudprovider.DriftReason) bool {
 		return string(i) != ""
 	})
@@ -142,6 +145,26 @@ func (c *CloudProvider) isCapacityReservationDrifted(instance *instance.Instance
 	capacityReservationIDs := sets.New(lo.Map(nodeClass.Status.CapacityReservations, func(cr v1.CapacityReservation, _ int) string { return cr.ID })...)
 	if instance.CapacityReservationID != nil && !capacityReservationIDs.Has(*instance.CapacityReservationID) {
 		return CapacityReservationDrift
+	}
+	return ""
+}
+
+// Checks if the efa policy is drifted, by comparing the efaPolicy persisted to the NodeClass to
+// the instance's EFAEnabled boolean.
+// Note: We handle drift dynamically for efa policy rather than relying on the static nodeClass hash.
+// to avoid unnecessary drift when changing to/from implicit policy, which is more permissive than
+// enabled/disabled policies.
+func (c *CloudProvider) isEFADrifted(instance *instance.Instance, nodeClass *v1.EC2NodeClass) cloudprovider.DriftReason {
+	efaPolicy := lo.Ternary(nodeClass.EFAPolicy() != nil, *nodeClass.EFAPolicy(), v1.EfaPolicyImplicit)
+	switch efaPolicy {
+	case v1.EfaPolicyEnabled:
+		if !instance.EFAEnabled {
+			return EFADrift
+		}
+	case v1.EfaPolicyDisabled:
+		if instance.EFAEnabled {
+			return EFADrift
+		}
 	}
 	return ""
 }
