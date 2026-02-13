@@ -149,12 +149,12 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1.EC2NodeClass
 
 	var opts []NewInstanceFromFleetOpts
 	if capacityType == karpv1.CapacityTypeReserved {
-		id, crt := p.getCapacityReservationDetailsForInstance(
+		id, crt, interruptible := p.getCapacityReservationDetailsForInstance(
 			string(fleetInstance.InstanceType),
 			*fleetInstance.LaunchTemplateAndOverrides.Overrides.AvailabilityZone,
 			instanceTypes,
 		)
-		opts = append(opts, WithCapacityReservationDetails(id, crt))
+		opts = append(opts, WithCapacityReservationDetails(id, crt, interruptible))
 	}
 	if lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA) {
 		opts = append(opts, WithEFAEnabled())
@@ -325,6 +325,7 @@ func (p *DefaultProvider) launchInstance(
 		log.FromContext(ctx).Error(err, "failed while checking on-demand fallback")
 	}
 
+	// TODO: will need to change here with CreateFleet surface
 	cfiBuilder := NewCreateFleetInputBuilder(capacityType, tags, launchTemplateConfigs)
 	if _, ok := nodeClaim.Annotations[v1alpha1.PriceOverlayAppliedAnnotationKey]; ok {
 		cfiBuilder.WithOverlay()
@@ -518,7 +519,7 @@ func (p *DefaultProvider) updateUnavailableOfferingsCache(
 
 	reservationIDs := make([]string, 0, len(errs))
 	for i := range errs {
-		id, _ := p.getCapacityReservationDetailsForInstance(
+		id, _, _ := p.getCapacityReservationDetailsForInstance(
 			string(errs[i].LaunchTemplateAndOverrides.Overrides.InstanceType),
 			lo.FromPtr(errs[i].LaunchTemplateAndOverrides.Overrides.AvailabilityZone),
 			instanceTypes,
@@ -534,7 +535,7 @@ func (p *DefaultProvider) updateUnavailableOfferingsCache(
 	p.capacityReservationProvider.MarkUnavailable(reservationIDs...)
 }
 
-func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zone string, instanceTypes []*cloudprovider.InstanceType) (id string, crt v1.CapacityReservationType) {
+func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zone string, instanceTypes []*cloudprovider.InstanceType) (id string, crt v1.CapacityReservationType, interruptible bool) {
 	for _, it := range instanceTypes {
 		if it.Name != instance {
 			continue
@@ -543,7 +544,7 @@ func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zon
 			if o.CapacityType() != karpv1.CapacityTypeReserved || o.Zone() != zone {
 				continue
 			}
-			return o.ReservationID(), v1.CapacityReservationType(o.Requirements.Get(v1.LabelCapacityReservationType).Any())
+			return o.ReservationID(), v1.CapacityReservationType(o.Requirements.Get(v1.LabelCapacityReservationType).Any()), o.Requirements.Get(v1.LabelCapacityReservationInterruptible).Any() == "true"
 		}
 	}
 	// note: this is an invariant that the caller must enforce, should not occur at runtime
