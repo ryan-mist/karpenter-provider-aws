@@ -125,18 +125,19 @@ var _ = Describe("Interruption", func() {
 			nil,
 		)
 		DeferCleanup(func() {
-			aws.ExpectCapacityReservationsCanceled(env.Context, env.EC2API, sourceReservationID)
+			aws.ExpectInterruptibleAndSourceCapacityCanceled(env.Context, env.EC2API, sourceReservationID, interruptibleReservationID)
 		})
 		nodeClass.Spec.CapacityReservationSelectorTerms = []v1.CapacityReservationSelectorTerm{
 			{ID: sourceReservationID}, {ID: interruptibleReservationID},
 		}
 		nodePool = coretest.ReplaceRequirements(nodePool,
 			karpv1.NodeSelectorRequirementWithMinValues{
-				Key:      corev1.LabelOSStable,
+				Key:      karpv1.CapacityTypeLabelKey,
 				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{string(corev1.Linux)},
+				Values:   []string{karpv1.CapacityTypeOnDemand, karpv1.CapacityTypeReserved},
 			},
 		)
+		env.ExpectCreated(nodeClass, nodePool)
 
 		By("Creating a node from IODCR")
 		numPods := 1
@@ -151,8 +152,7 @@ var _ = Describe("Interruption", func() {
 		})
 		selector := labels.SelectorFromSet(dep.Spec.Selector.MatchLabels)
 
-		env.ExpectCreated(nodeClass, nodePool, dep)
-
+		env.ExpectCreated(dep)
 		env.EventuallyExpectHealthyPodCount(selector, numPods)
 		env.ExpectCreatedNodeCount("==", 1)
 		node := env.Monitor.CreatedNodes()[0]

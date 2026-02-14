@@ -585,7 +585,7 @@ func ExpectModifyInterruptibleCapacity(
 	Expect(err).ToNot(HaveOccurred())
 }
 
-func ExpectInterruptibleCapacityCanceled(
+func ExpectInterruptibleAndSourceCapacityCanceled(
 	ctx context.Context,
 	ec2api *ec2.Client,
 	sourceReservationId string,
@@ -608,6 +608,15 @@ func ExpectInterruptibleCapacityCanceled(
 		g.Expect(len(out.CapacityReservations)).To(Equal(1))
 		g.Expect(out.CapacityReservations[0].State).To(Equal(ec2types.CapacityReservationStateCancelled))
 	}).WithTimeout(3 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+
+	// there can be transient delays in when IODCR capacity is fully reclaimed and when the source ODCR can be cancelled
+	// if we directly try to cancel the source reservation we'll see error "has an active interruptible capacity allocation"
+	Eventually(func(g Gomega) {
+		ec2api.CancelCapacityReservation(ctx, &ec2.CancelCapacityReservationInput{
+			CapacityReservationId: &sourceReservationId,
+		})
+		Expect(err).ToNot(HaveOccurred())
+	}).WithTimeout(1 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 func ExpectCapacityReservationCreated(
