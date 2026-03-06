@@ -149,12 +149,12 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1.EC2NodeClass
 
 	var opts []NewInstanceFromFleetOpts
 	if capacityType == karpv1.CapacityTypeReserved {
-		id, crt := p.getCapacityReservationDetailsForInstance(
+		id, crt, interruptible := p.getCapacityReservationDetailsForInstance(
 			string(fleetInstance.InstanceType),
 			*fleetInstance.LaunchTemplateAndOverrides.Overrides.AvailabilityZone,
 			instanceTypes,
 		)
-		opts = append(opts, WithCapacityReservationDetails(id, crt))
+		opts = append(opts, WithCapacityReservationDetails(id, crt, interruptible))
 	}
 	if lo.Contains(lo.Keys(nodeClaim.Spec.Resources.Requests), v1.ResourceEFA) {
 		opts = append(opts, WithEFAEnabled())
@@ -337,7 +337,7 @@ func (p *DefaultProvider) launchInstance(
 		if crt == nil {
 			panic(fmt.Sprintf("%s label isn't set for instance types in reserved launch", v1.LabelCapacityReservationType))
 		}
-		cfiBuilder.WithCapacityReservationType(*crt)
+		cfiBuilder.WithCapacityReservationType(*crt, getCapacityReservationInterruptible(instanceTypes))
 	}
 	createFleetInput := cfiBuilder.Build()
 
@@ -518,7 +518,7 @@ func (p *DefaultProvider) updateUnavailableOfferingsCache(
 
 	reservationIDs := make([]string, 0, len(errs))
 	for i := range errs {
-		id, _ := p.getCapacityReservationDetailsForInstance(
+		id, _, _ := p.getCapacityReservationDetailsForInstance(
 			string(errs[i].LaunchTemplateAndOverrides.Overrides.InstanceType),
 			lo.FromPtr(errs[i].LaunchTemplateAndOverrides.Overrides.AvailabilityZone),
 			instanceTypes,
@@ -534,7 +534,7 @@ func (p *DefaultProvider) updateUnavailableOfferingsCache(
 	p.capacityReservationProvider.MarkUnavailable(reservationIDs...)
 }
 
-func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zone string, instanceTypes []*cloudprovider.InstanceType) (id string, crt v1.CapacityReservationType) {
+func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zone string, instanceTypes []*cloudprovider.InstanceType) (id string, crt v1.CapacityReservationType, interruptible bool) {
 	for _, it := range instanceTypes {
 		if it.Name != instance {
 			continue
@@ -543,7 +543,7 @@ func (p *DefaultProvider) getCapacityReservationDetailsForInstance(instance, zon
 			if o.CapacityType() != karpv1.CapacityTypeReserved || o.Zone() != zone {
 				continue
 			}
-			return o.ReservationID(), v1.CapacityReservationType(o.Requirements.Get(v1.LabelCapacityReservationType).Any())
+			return o.ReservationID(), v1.CapacityReservationType(o.Requirements.Get(v1.LabelCapacityReservationType).Any()), o.Requirements.Get(v1.LabelCapacityReservationInterruptible).Any() == "true"
 		}
 	}
 	// note: this is an invariant that the caller must enforce, should not occur at runtime
@@ -597,6 +597,17 @@ func getCapacityReservationType(instanceTypes []*cloudprovider.InstanceType) *v1
 		}
 	}
 	return nil
+}
+
+func getCapacityReservationInterruptible(instanceTypes []*cloudprovider.InstanceType) bool {
+	for _, it := range instanceTypes {
+		for _, o := range it.Offerings {
+			if o.Requirements.Has(v1.LabelCapacityReservationInterruptible) {
+				return o.Requirements.Get(v1.LabelCapacityReservationInterruptible).Any() == "true"
+			}
+		}
+	}
+	return false
 }
 
 func instancesFromOutput(ctx context.Context, out *ec2.DescribeInstancesOutput) ([]*Instance, error) {

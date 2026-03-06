@@ -422,6 +422,7 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 			if req.Len() == 1 && !lo.Contains([]string{
 				cloudprovider.ReservationIDLabel,
 				v1.LabelCapacityReservationType,
+				v1.LabelCapacityReservationInterruptible,
 			}, req.Key) {
 				labels[key] = req.Values()[0]
 			}
@@ -457,6 +458,7 @@ func (c *CloudProvider) instanceToNodeClaim(i *instance.Instance, instanceType *
 	if i.CapacityType == karpv1.CapacityTypeReserved {
 		labels[cloudprovider.ReservationIDLabel] = *i.CapacityReservationID
 		labels[v1.LabelCapacityReservationType] = string(*i.CapacityReservationType)
+		labels[v1.LabelCapacityReservationInterruptible] = fmt.Sprintf("%t", *i.CapacityReservationInterruptible)
 	}
 	if v, ok := i.Tags[karpv1.NodePoolLabelKey]; ok {
 		labels[karpv1.NodePoolLabelKey] = v
