@@ -49,7 +49,7 @@ func main() {
 		resourcetypes.NewLaunchTemplate(ec2Client),
 		resourcetypes.NewOIDC(iamClient),
 		resourcetypes.NewInstanceProfile(iamClient),
-		resourcetypes.NewStack(cloudFormationClient),
+		resourcetypes.NewStack(cloudFormationClient, iamClient, ec2Client),
 		resourcetypes.NewVPCPeeringConnection(ec2Client),
 	}
 

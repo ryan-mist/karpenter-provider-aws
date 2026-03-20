@@ -45,6 +45,8 @@ func main() {
 	cfg := lo.Must(config.LoadDefaultConfig(ctx))
 	cfg.RetryMaxAttempts = 10
 
+	cfg.Region = "us-east-2"
+
 	logger := lo.Must(zap.NewProduction()).Sugar()
 
 	expirationTTL, err := time.ParseDuration(lo.FromPtr(expiration))
@@ -73,7 +75,7 @@ func main() {
 		resourcetypes.NewLaunchTemplate(ec2Client),
 		resourcetypes.NewOIDC(iamClient),
 		resourcetypes.NewInstanceProfile(iamClient),
-		resourcetypes.NewStack(cloudFormationClient),
+		resourcetypes.NewStack(cloudFormationClient, iamClient, ec2Client),
 		resourcetypes.NewVPCPeeringConnection(ec2Client),
 	}
 
