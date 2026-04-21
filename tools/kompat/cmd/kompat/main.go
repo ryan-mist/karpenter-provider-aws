@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/samber/lo"
 	"github.com/spf13/cobra"
 
@@ -116,12 +117,12 @@ func PrettyEncode(data any) string {
 }
 
 func PrettyTable[T any](data []T, wide bool) string {
-	var headers []string
-	var rows [][]string
+	var headers []any
+	var rows []any
 	for _, dataRow := range data {
 		var row []string
 		// clear headers each time so we only keep one set
-		headers = []string{}
+		headers = []any{}
 		reflectStruct := reflect.Indirect(reflect.ValueOf(dataRow))
 		for i := 0; i < reflectStruct.NumField(); i++ {
 			typeField := reflectStruct.Type().Field(i)
@@ -139,20 +140,18 @@ func PrettyTable[T any](data []T, wide bool) string {
 		rows = append(rows, row)
 	}
 	out := bytes.Buffer{}
-	table := tablewriter.NewWriter(&out)
-	table.SetHeader(headers)
-	table.SetAutoWrapText(false)
-	table.SetAutoFormatHeaders(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAlignment(tablewriter.ALIGN_LEFT)
-	table.SetCenterSeparator("")
-	table.SetColumnSeparator("")
-	table.SetRowSeparator("")
-	table.SetHeaderLine(false)
-	table.SetBorder(false)
-	table.SetTablePadding("\t") // pad with tabs
-	table.SetNoWhiteSpace(true)
-	table.AppendBulk(rows) // Add Bulk Data
+
+	table := tablewriter.NewTable(&out,
+		tablewriter.WithRowAutoWrap(tw.WrapNone),
+		tablewriter.WithHeaderAutoFormat(tw.On),
+		tablewriter.WithHeaderAlignment(tw.AlignLeft),
+		tablewriter.WithRowAlignment(tw.AlignLeft),
+		tablewriter.WithRendition(tw.Rendition{}),
+		tablewriter.WithPadding(tw.Padding{Left: "\t", Right: "\t"}),
+		tablewriter.WithTrimSpace(tw.Off),
+	)
+	table.Header(headers...)
+	table.Bulk(rows)
 	table.Render()
 	return out.String()
 }

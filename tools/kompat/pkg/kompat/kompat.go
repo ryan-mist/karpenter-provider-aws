@@ -30,6 +30,8 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/mitchellh/go-homedir"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 	"github.com/samber/lo"
 	"gopkg.in/yaml.v3"
 )
@@ -188,8 +190,7 @@ func (k List) YAML() string {
 func (k Kompat) Markdown(_ ...Options) string {
 	// options := mergeOptions(opts...)
 	out := bytes.Buffer{}
-	table := tablewriter.NewWriter(&out)
-	headers := []string{"Kubernetes"}
+	headers := []any{"Kubernetes"}
 	data := []string{k.Name}
 	for _, c := range k.Compatibility {
 		if c.MaxK8sVersion == "" || c.MinK8sVersion == c.MaxK8sVersion {
@@ -199,21 +200,29 @@ func (k Kompat) Markdown(_ ...Options) string {
 		}
 		data = append(data, c.AppVersion)
 	}
-	table.SetHeader(headers)
-	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
-	table.SetCenterSeparator("|")
-	table.AppendBulk([][]string{data})
+
+	symbols := tw.NewSymbolCustom("markdown").
+		WithColumn("|").
+		WithCenter("|").
+		WithRow("-")
+
+	table := tablewriter.NewTable(&out,
+		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
+			Symbols: symbols,
+			Borders: tw.Border{Left: tw.On, Top: tw.Off, Right: tw.On, Bottom: tw.Off},
+		})),
+		tablewriter.WithHeaderAutoFormat(tw.Off),
+	)
+
+	table.Header(headers...)
+	table.Bulk([]any{data})
 	table.Render()
 	return out.String()
 }
 
 func (k List) Markdown(opts ...Options) string {
 	options := mergeOptions(opts...)
-	// if len(k) == 1 {
-	// 	return k[0].Markdown()
-	// }
 	out := bytes.Buffer{}
-	table := tablewriter.NewWriter(&out)
 	headers := []string{"Kubernetes"}
 	var data [][]string
 	// Get all k8s versions for the first row
@@ -245,10 +254,26 @@ func (k List) Markdown(opts ...Options) string {
 			data[i] = append(data[i], semverRange(k8sVersionToAppVersions[k8sVersion], allAppVersions...))
 		}
 	}
-	table.SetHeader(headers)
-	table.SetBorders(tablewriter.Border{Left: true, Top: false, Right: true, Bottom: false})
-	table.SetCenterSeparator("|")
-	table.AppendBulk(data)
+
+	symbols := tw.NewSymbolCustom("markdown").
+		WithColumn("|").
+		WithCenter("|").
+		WithRow("-")
+
+	table := tablewriter.NewTable(&out,
+		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
+			Symbols: symbols,
+			Borders: tw.Border{Left: tw.On, Top: tw.Off, Right: tw.On, Bottom: tw.Off},
+		})),
+		tablewriter.WithHeaderAutoFormat(tw.Off),
+	)
+
+	headerAny := make([]any, len(headers))
+	for i, h := range headers {
+		headerAny[i] = h
+	}
+	table.Header(headerAny...)
+	table.Bulk(data)
 	table.Render()
 	return out.String()
 }
