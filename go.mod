@@ -2,6 +2,8 @@ module github.com/aws/karpenter-provider-aws
 
 go 1.26.2
 
+replace github.com/aws/karpenter-provider-aws/tools/kompat => ./tools/kompat
+
 require (
 	github.com/Pallinder/go-randomdata v1.2.0
 	github.com/PuerkitoBio/goquery v1.11.0
