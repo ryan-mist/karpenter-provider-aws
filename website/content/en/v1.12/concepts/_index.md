@@ -10,6 +10,7 @@ Users fall under two basic roles: [Kubernetes cluster administrators]({{<ref "#c
 
 ## Cluster Administrator
 
+Test
 As a Kubernetes cluster administrator, you can engage with Karpenter to:
 
 * Install Karpenter
