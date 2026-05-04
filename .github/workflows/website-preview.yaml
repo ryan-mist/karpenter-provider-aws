@@ -27,6 +27,15 @@ jobs:
         with:
           ref: ${{ env.PR_COMMIT }}
           path: pr-content
+      - name: Verify isolation
+        run: |
+          echo "=== Workspace root .github/actions (should be from main) ==="
+          git -C . log --oneline -1
+          cat .github/actions/commit-status/start/action.yaml | head -5
+          echo ""
+          echo "=== PR content (should be from PR commit ${{ env.PR_COMMIT }}) ==="
+          git -C pr-content log --oneline -1
+          ls pr-content/website/ | head -5
       - uses: ./.github/actions/commit-status/start
         with:
           name: "${{ github.workflow }} / ${{ github.job }} (pull_request_review)"
