@@ -22,6 +22,7 @@ import (
 
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/patrickmn/go-cache"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -70,6 +71,7 @@ type CloudProvider struct {
 	capacityReservationProvider capacityreservation.Provider
 	placementGroupProvider      placementgroup.Provider
 	instanceTypeStore           *nodeoverlay.InstanceTypeStore
+	recentlyLaunchedCache       *cache.Cache
 	caBundle                    *string
 }
 
@@ -83,6 +85,7 @@ func New(
 	capacityReservationProvider capacityreservation.Provider,
 	placementGroupProvider placementgroup.Provider,
 	store *nodeoverlay.InstanceTypeStore,
+	recentlyLaunchedCache *cache.Cache,
 	caBundle *string,
 ) *CloudProvider {
 	return &CloudProvider{
@@ -95,6 +98,7 @@ func New(
 		placementGroupProvider:      placementGroupProvider,
 		recorder:                    recorder,
 		instanceTypeStore:           store,
+		recentlyLaunchedCache:       recentlyLaunchedCache,
 		caBundle:                    caBundle,
 	}
 }
@@ -159,6 +163,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		v1.AnnotationEC2NodeClassHashVersion: v1.EC2NodeClassHashVersion,
 		v1.AnnotationInstanceProfile:         nodeClass.Status.InstanceProfile,
 	})
+	c.recentlyLaunchedCache.SetDefault(nc.Status.ProviderID, struct{}{})
 	return nc, nil
 }
 

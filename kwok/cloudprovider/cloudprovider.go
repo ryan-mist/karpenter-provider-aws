@@ -16,6 +16,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/patrickmn/go-cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
@@ -46,6 +47,7 @@ func New(
 	capacityReservationProvider capacityreservation.Provider,
 	placementGroupProvider placementgroup.Provider,
 	instanceTypeStore *nodeoverlay.InstanceTypeStore,
+	recentlyLaunchedCache *cache.Cache,
 ) *CloudProvider {
 	return &CloudProvider{
 		CloudProvider: cloudprovider.New(
@@ -58,6 +60,7 @@ func New(
 			capacityReservationProvider,
 			placementGroupProvider,
 			instanceTypeStore,
+			recentlyLaunchedCache,
 			lo.ToPtr(""),
 		),
 	}

@@ -51,6 +51,9 @@ const (
 	RecreationTTL = 1 * time.Minute
 	// ProtectedProfilesTTL is the duration to keep profiles as protected before nodeclass garbagecollector considers deletion
 	ProtectedProfilesTTL = 1 * time.Hour
+	// RecentlyLaunchedTTL is the duration to protect recently-launched instances from garbage collection
+	// in the event of stale informer caches. Must exceed worst-case informer re-list delay (typically 1-3 minutes).
+	RecentlyLaunchedTTL = 5 * time.Minute
 )
 
 const (

@@ -42,6 +42,7 @@ func main() {
 		op.CapacityReservationProvider,
 		op.PlacementGroupProvider,
 		op.InstanceTypeStore,
+		op.RecentlyLaunchedCache,
 		op.CABundle,
 	)
 	overlayUndecoratedCloudProvider := metrics.Decorate(awsCloudProvider)
@@ -92,6 +93,7 @@ func main() {
 			op.AMIResolver,
 			op.ZonalShiftProvider,
 			op.InstanceStatusProvider,
+			op.RecentlyLaunchedCache,
 			op.CABundle,
 		)...).
 		Start(ctx)

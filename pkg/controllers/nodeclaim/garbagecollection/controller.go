@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
@@ -39,16 +40,18 @@ import (
 )
 
 type Controller struct {
-	kubeClient      client.Client
-	cloudProvider   cloudprovider.CloudProvider
-	successfulCount uint64 // keeps track of successful reconciles for more aggressive requeueing near the start of the controller
+	kubeClient            client.Client
+	cloudProvider         cloudprovider.CloudProvider
+	recentlyLaunchedCache *cache.Cache
+	successfulCount       uint64 // keeps track of successful reconciles for more aggressive requeueing near the start of the controller
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, recentlyLaunchedCache *cache.Cache) *Controller {
 	return &Controller{
-		kubeClient:      kubeClient,
-		cloudProvider:   cloudProvider,
-		successfulCount: 0,
+		kubeClient:            kubeClient,
+		cloudProvider:         cloudProvider,
+		recentlyLaunchedCache: recentlyLaunchedCache,
+		successfulCount:       0,
 	}
 }
 
@@ -80,6 +83,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	errs := make([]error, len(cloudNodeClaims))
 	workqueue.ParallelizeUntil(ctx, 100, len(cloudNodeClaims), func(i int) {
 		if nc := cloudNodeClaims[i]; !clusterProviderIDs.Has(nc.Status.ProviderID) && time.Since(nc.CreationTimestamp.Time) > time.Second*30 {
+			if _, found := c.recentlyLaunchedCache.Get(nc.Status.ProviderID); found {
+				log.FromContext(ctx).V(1).WithValues("provider-id", nc.Status.ProviderID).Info("skipping garbage collection of recently launched instance")
+				return
+			}
 			errs[i] = c.garbageCollect(ctx, cloudNodeClaims[i], nodeList)
 		}
 	})

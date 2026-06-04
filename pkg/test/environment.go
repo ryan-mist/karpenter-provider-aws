@@ -93,6 +93,7 @@ type Environment struct {
 	ValidationCache                      *cache.Cache
 	RecreationCache                      *cache.Cache
 	ProtectedProfilesCache               *cache.Cache
+	RecentlyLaunchedCache                *cache.Cache
 
 	// Providers
 	CapacityReservationProvider *capacityreservation.DefaultProvider
@@ -148,6 +149,7 @@ func NewEnvironment(ctx context.Context, env *coretest.Environment) *Environment
 	placementGroupAvailabilityCache := cache.New(awscache.PlacementGroupAvailabilityTTL, awscache.DefaultCleanupInterval)
 	validationCache := cache.New(awscache.DefaultTTL, awscache.DefaultCleanupInterval)
 	recreationCache := cache.New(awscache.DefaultTTL, awscache.DefaultCleanupInterval)
+	recentlyLaunchedCache := cache.New(awscache.RecentlyLaunchedTTL, awscache.DefaultCleanupInterval)
 	fakePricingAPI := &fake.PricingAPI{}
 	eventRecorder := coretest.NewEventRecorder()
 
@@ -239,6 +241,7 @@ func NewEnvironment(ctx context.Context, env *coretest.Environment) *Environment
 		ValidationCache:                      validationCache,
 		RecreationCache:                      recreationCache,
 		ProtectedProfilesCache:               protectedProfilesCache,
+		RecentlyLaunchedCache:                recentlyLaunchedCache,
 
 		CapacityReservationProvider: capacityReservationProvider,
 		PlacementGroupProvider:      placementGroupProvider,
@@ -288,6 +291,7 @@ func (env *Environment) Reset() {
 	env.ValidationCache.Flush()
 	env.RecreationCache.Flush()
 	env.ProtectedProfilesCache.Flush()
+	env.RecentlyLaunchedCache.Flush()
 	mfs, err := crmetrics.Registry.Gather()
 	if err != nil {
 		for _, mf := range mfs {

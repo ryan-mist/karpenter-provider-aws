@@ -99,6 +99,7 @@ type Operator struct {
 	PlacementGroupProvider      placementgroup.Provider
 	EC2API                      *ec2.Client
 	ZonalShiftProvider          zonalshiftprovider.Provider
+	RecentlyLaunchedCache       *cache.Cache
 	CABundle                    *string
 }
 
@@ -151,6 +152,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	ssmCache := cache.New(awscache.SSMCacheTTL, awscache.DefaultCleanupInterval)
 	validationCache := cache.New(awscache.ValidationTTL, awscache.DefaultCleanupInterval)
 	recreationCache := cache.New(awscache.RecreationTTL, awscache.DefaultCleanupInterval)
+	recentlyLaunchedCache := cache.New(awscache.RecentlyLaunchedTTL, awscache.DefaultCleanupInterval)
 
 	subnetRefreshInterval := options.FromContext(ctx).SubnetRefreshInterval
 	subnetIPCacheTTL := max(awscache.AvailableIPAddressTTL, subnetRefreshInterval+(awscache.AvailableIPAddressTTL-awscache.DefaultTTL))
@@ -268,6 +270,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		PlacementGroupProvider:      placementGroupProvider,
 		EC2API:                      ec2api,
 		ZonalShiftProvider:          zsProvider,
+		RecentlyLaunchedCache:       recentlyLaunchedCache,
 		CABundle:                    caBundle,
 	}
 }
