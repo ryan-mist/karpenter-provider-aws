@@ -1442,7 +1442,7 @@ var _ = Describe("CloudProvider", func() {
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"dl1.24xlarge"},
+					Values:   []string{"p5.48xlarge"},
 				},
 			}
 			nodeClaim.Spec.Resources.Requests = corev1.ResourceList{v1.ResourceEFA: resource.MustParse("1")}
@@ -1459,7 +1459,7 @@ var _ = Describe("CloudProvider", func() {
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"dl1.24xlarge"},
+					Values:   []string{"p5.48xlarge"},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClass, nodeClaim)
@@ -1484,7 +1484,7 @@ var _ = Describe("CloudProvider", func() {
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"dl1.24xlarge"},
+					Values:   []string{"p5.48xlarge"},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClass, nodeClaim)
@@ -1512,7 +1512,7 @@ var _ = Describe("CloudProvider", func() {
 				{
 					Key:      corev1.LabelInstanceTypeStable,
 					Operator: corev1.NodeSelectorOpIn,
-					Values:   []string{"dl1.24xlarge"},
+					Values:   []string{"p5.48xlarge"},
 				},
 			}
 			ExpectApplied(ctx, env.Client, nodePool, nodeClass, nodeClaim)
