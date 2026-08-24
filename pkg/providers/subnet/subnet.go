@@ -85,15 +85,21 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 	if len(filterSets) == 0 {
 		return []ec2types.Subnet{}, nil
 	}
-	hash := utils.GetNodeClassHash(nodeClass)
-	if subnets, ok := p.cache.Get(hash); ok {
-		// Ensure what's returned from this function is a shallow-copy of the slice (not a deep-copy of the data itself)
-		// so that modifications to the ordering of the data don't affect the original
-		return append([]ec2types.Subnet{}, subnets.([]ec2types.Subnet)...), nil
-	}
-	// Ensure that all the subnets that are returned here are unique
+	// Ensure that all the subnets that are returned here are unique. Results are
+	// cached per filter set (a single DescribeSubnets call) rather than per
+	// NodeClass, so NodeClasses that share a selector term share the underlying
+	// cache entry and avoid redundant EC2 calls (see #9063).
 	subnets := map[string]ec2types.Subnet{}
 	for _, filters := range filterSets {
+		key := utils.CanonicalFilterSetKey(filters)
+		if cached, ok := p.cache.Get(key); ok {
+			cachedSubnets := cached.([]ec2types.Subnet)
+			for i := range cachedSubnets {
+				subnets[lo.FromPtr(cachedSubnets[i].SubnetId)] = cachedSubnets[i]
+			}
+			continue
+		}
+		filterSetSubnets := map[string]ec2types.Subnet{}
 		paginator := ec2.NewDescribeSubnetsPaginator(p.ec2api, &ec2.DescribeSubnetsInput{
 			Filters:    filters,
 			MaxResults: lo.ToPtr(int32(500)),
@@ -104,15 +110,18 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 				return nil, serrors.Wrap(fmt.Errorf("describing subnets with filters, %w", err), "filters", pretty.Concise(filters))
 			}
 			for i := range output.Subnets {
-				subnets[lo.FromPtr(output.Subnets[i].SubnetId)] = output.Subnets[i]
+				filterSetSubnets[lo.FromPtr(output.Subnets[i].SubnetId)] = output.Subnets[i]
 				p.availableIPAddressCache.SetDefault(lo.FromPtr(output.Subnets[i].SubnetId), lo.FromPtr(output.Subnets[i].AvailableIpAddressCount))
 				// subnets can be leaked here, if a subnets is never called received from ec2
 				// we are accepting it for now, as this will be an insignificant amount of memory
 				delete(p.inflightIPs, lo.FromPtr(output.Subnets[i].SubnetId)) // remove any previously tracked IP addresses since we just refreshed from EC2
 			}
 		}
+		p.cache.SetDefault(key, lo.Values(filterSetSubnets))
+		for id, subnet := range filterSetSubnets {
+			subnets[id] = subnet
+		}
 	}
-	p.cache.SetDefault(hash, lo.Values(subnets))
 	if p.cm.HasChanged(fmt.Sprintf("subnets/%s", nodeClass.Name), lo.Keys(subnets)) {
 		log.FromContext(ctx).
 			WithValues("subnets", lo.Map(lo.Values(subnets), func(s ec2types.Subnet, _ int) v1.Subnet {

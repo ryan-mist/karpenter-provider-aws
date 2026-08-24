@@ -17,11 +17,11 @@ package utils_test
 import (
 	"testing"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
 	"github.com/aws/karpenter-provider-aws/pkg/utils"
 )
 
@@ -30,15 +30,31 @@ func TestUtils(t *testing.T) {
 	RunSpecs(t, "Utils Suite")
 }
 
-var _ = Describe("GetNodeClassHash", func() {
-	It("should return formatted hash with UID and Generation", func() {
-		nodeClass := &v1.EC2NodeClass{
-			ObjectMeta: metav1.ObjectMeta{
-				UID:        "test-uid-123",
-				Generation: 5,
-			},
-		}
-		hash := utils.GetNodeClassHash(nodeClass)
-		Expect(hash).To(Equal("test-uid-123-5"))
+var _ = Describe("CanonicalFilterSetKey", func() {
+	filter := func(name string, values ...string) ec2types.Filter {
+		return ec2types.Filter{Name: aws.String(name), Values: values}
+	}
+	It("is independent of the order of filters and of values within a filter", func() {
+		a := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1", "2"), filter("tag:b", "3")})
+		b := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "3"), filter("tag:a", "2", "1")})
+		Expect(a).To(Equal(b))
+	})
+	It("distinguishes AND (one filter set) from OR (separate filter sets)", func() {
+		and := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1"), filter("tag:b", "2")})
+		orA := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1")})
+		orB := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "2")})
+		Expect(and).ToNot(Equal(orA))
+		Expect(and).ToNot(Equal(orB))
+		Expect(orA).ToNot(Equal(orB))
+	})
+	It("distinguishes different filter values", func() {
+		Expect(utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1")})).
+			ToNot(Equal(utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "2")})))
+	})
+	It("does not collide on filter sets containing duplicate values (unlike SlicesAsSets)", func() {
+		dup := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1", "1")})
+		other := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "2", "2")})
+		Expect(dup).ToNot(Equal(other))
+		Expect(dup).ToNot(BeEmpty())
 	})
 })

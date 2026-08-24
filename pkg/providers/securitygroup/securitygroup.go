@@ -72,14 +72,23 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 
 func (p *DefaultProvider) getSecurityGroups(ctx context.Context, nodeClass *v1.EC2NodeClass) ([]ec2types.SecurityGroup, error) {
 	filterSets := getFilterSets(nodeClass.Spec.SecurityGroupSelectorTerms)
-	hash := utils.GetNodeClassHash(nodeClass)
-	if sg, ok := p.cache.Get(hash); ok {
-		// Ensure what's returned from this function is a shallow-copy of the slice (not a deep-copy of the data itself)
-		// so that modifications to the ordering of the data don't affect the original
-		return append([]ec2types.SecurityGroup{}, sg.([]ec2types.SecurityGroup)...), nil
-	}
+	// Results are cached per filter set (a single DescribeSecurityGroups call)
+	// rather than per NodeClass, so NodeClasses that share a selector term share
+	// the underlying cache entry and avoid redundant EC2 calls (see #9063).
+	// Keying per filter set also preserves the distinction between AND (multiple
+	// filters in one set) and OR (multiple sets), avoiding the hash collisions
+	// described in #8619.
 	securityGroups := map[string]ec2types.SecurityGroup{}
 	for _, filters := range filterSets {
+		key := utils.CanonicalFilterSetKey(filters)
+		if cached, ok := p.cache.Get(key); ok {
+			cachedSecurityGroups := cached.([]ec2types.SecurityGroup)
+			for i := range cachedSecurityGroups {
+				securityGroups[lo.FromPtr(cachedSecurityGroups[i].GroupId)] = cachedSecurityGroups[i]
+			}
+			continue
+		}
+		filterSetSecurityGroups := map[string]ec2types.SecurityGroup{}
 		paginator := ec2.NewDescribeSecurityGroupsPaginator(p.ec2api, &ec2.DescribeSecurityGroupsInput{
 			MaxResults: aws.Int32(500),
 			Filters:    filters,
@@ -87,14 +96,17 @@ func (p *DefaultProvider) getSecurityGroups(ctx context.Context, nodeClass *v1.E
 		for paginator.HasMorePages() {
 			output, err := paginator.NextPage(ctx)
 			if err != nil {
-				return nil, fmt.Errorf("describing security groups %+v, %w", filterSets, err)
+				return nil, fmt.Errorf("describing security groups %+v, %w", filters, err)
 			}
 			for i := range output.SecurityGroups {
-				securityGroups[lo.FromPtr(output.SecurityGroups[i].GroupId)] = output.SecurityGroups[i]
+				filterSetSecurityGroups[lo.FromPtr(output.SecurityGroups[i].GroupId)] = output.SecurityGroups[i]
 			}
 		}
+		p.cache.SetDefault(key, lo.Values(filterSetSecurityGroups))
+		for id, securityGroup := range filterSetSecurityGroups {
+			securityGroups[id] = securityGroup
+		}
 	}
-	p.cache.SetDefault(hash, lo.Values(securityGroups))
 	return lo.Values(securityGroups), nil
 }
 

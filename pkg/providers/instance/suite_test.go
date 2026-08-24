@@ -735,6 +735,13 @@ var _ = Describe("InstanceProvider", func() {
 		}
 		ExpectApplied(ctx, env.Client, nodeClaim, nodePool, nodeClass)
 		nodeClass = ExpectExists(ctx, env.Client, nodeClass)
+		// The BeforeEach already hydrated the subnet cache with the default subnets
+		// under this NodeClass's selector. Flush it so the List below is a genuine
+		// cache miss that re-describes subnets and refreshes availableIPAddressCache
+		// with the IP counts set above (simulating the periodic List after the
+		// cached entry expires). Subnet resolution is cached by selector content, so
+		// a NodeClass update alone no longer invalidates the entry.
+		awsEnv.SubnetCache.Flush()
 		_, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
 		Expect(err).To(BeNil())
 

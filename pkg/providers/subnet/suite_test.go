@@ -421,28 +421,34 @@ var _ = Describe("SubnetProvider", func() {
 			}, subnets)
 
 			cacheItems := awsEnv.SubnetCache.Items()
-			// There should be 2 cache entries one for each semantic.
-			Expect(cacheItems).To(HaveLen(2))
+			// Caching is per filter set, so there is one entry for the AND filter
+			// set and one entry for each of the two OR filter sets.
+			Expect(cacheItems).To(HaveLen(3))
 			// Extract cached subnet arrays for comparison
 			cachedSubnets := make([][]ec2types.Subnet, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedSubnets = append(cachedSubnets, item.Object.([]ec2types.Subnet))
 			}
-			// Expect cache to contain result of both look ups.
-			Expect(cachedSubnets).To(ContainElement(ContainElements(
+			// Each OR filter set is cached independently as a single-element result.
+			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
 						SubnetId:  aws.String("test-subnet-id-1"),
 						SubnetArn: aws.String("test-subnet-arn-1"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-1"), Value: aws.String("tag-value-1")}},
 					},
+				},
+			))
+			Expect(cachedSubnets).To(ContainElement(
+				[]ec2types.Subnet{
 					{
 						SubnetId:  aws.String("test-subnet-id-2"),
 						SubnetArn: aws.String("test-subnet-arn-2"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-2"), Value: aws.String("tag-value-2")}},
 					},
 				},
-			)))
+			))
+			// The AND filter set is cached as its own entry, distinct from the OR sets.
 			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
@@ -452,6 +458,46 @@ var _ = Describe("SubnetProvider", func() {
 					},
 				},
 			))
+		})
+		It("should share a cache entry across NodeClasses with an identical selector term", func() {
+			awsEnv.EC2API.DescribeSubnetsBehavior.Output.Set(&ec2.DescribeSubnetsOutput{Subnets: []ec2types.Subnet{
+				{SubnetId: aws.String("test-subnet-id-1"), SubnetArn: aws.String("test-subnet-arn-1")},
+			}})
+			nodeClass.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			// The second NodeClass resolves the same filter set and is served from
+			// the shared cache entry, so only a single DescribeSubnets call is made.
+			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(1))
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
+		})
+		It("should reuse the cache entry for a shared selector term across NodeClasses with partially overlapping selectors", func() {
+			awsEnv.EC2API.DescribeSubnetsBehavior.Output.Set(&ec2.DescribeSubnetsOutput{Subnets: []ec2types.Subnet{
+				{SubnetId: aws.String("test-subnet-id-1"), SubnetArn: aws.String("test-subnet-arn-1")},
+			}})
+			nodeClass.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{
+				{Tags: map[string]string{"foo": "bar"}},
+				{Tags: map[string]string{"baz": "qux"}},
+			}
+			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			// The {foo=bar} filter set is reused from the first NodeClass; only the
+			// new {baz=qux} filter set triggers an additional DescribeSubnets call.
+			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(2))
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(2))
 		})
 	})
 	It("should not cause data races when calling List() simultaneously", func() {

@@ -15,9 +15,11 @@ limitations under the License.
 package utils
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -122,6 +124,35 @@ func GetTags(nodeClass *v1.EC2NodeClass, nodeClaim *karpv1.NodeClaim, clusterNam
 	return lo.Assign(nodeClass.Spec.Tags, staticTags), nil
 }
 
-func GetNodeClassHash(nodeClass *v1.EC2NodeClass) string {
-	return fmt.Sprintf("%s-%d", nodeClass.UID, nodeClass.Generation)
+// CanonicalFilterSetKey returns a deterministic, collision-free cache key for a
+// single resolved EC2 filter set. A filter set is the list of filters passed to
+// one Describe* call, which the EC2 API evaluates as a logical AND. Filters and
+// the values within each filter are sorted so that semantically identical filter
+// sets map to the same key regardless of the order the selector terms were
+// authored in, while any difference in filter names, values, or the number of
+// filters (i.e. AND grouping) produces a distinct key.
+//
+// This encoding is used to cache selector resolution per filter set rather than
+// per NodeClass, allowing NodeClasses that share a selector term to share the
+// underlying cache entry (see #9063). Unlike hashstructure with SlicesAsSets —
+// which collapsed nested AND/OR grouping and hashed slices containing duplicate
+// elements to zero (see #8619) — this preserves the exact structure of the
+// filter set, so distinct selectors can never alias.
+func CanonicalFilterSetKey(filters []ec2types.Filter) string {
+	// Marshal each filter independently (with its values sorted), then sort the
+	// encoded filters. Because each encoded filter is a self-delimiting JSON
+	// object, the concatenation is injective over the multiset of filters, and
+	// sorting makes it independent of filter ordering within the set.
+	encoded := make([]string, 0, len(filters))
+	for _, filter := range filters {
+		values := append([]string(nil), filter.Values...)
+		sort.Strings(values)
+		b, _ := json.Marshal(struct {
+			Name   string
+			Values []string
+		}{Name: aws.ToString(filter.Name), Values: values})
+		encoded = append(encoded, string(b))
+	}
+	sort.Strings(encoded)
+	return strings.Join(encoded, "")
 }

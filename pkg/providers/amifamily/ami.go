@@ -17,6 +17,7 @@ package amifamily
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ import (
 
 type Provider interface {
 	List(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error)
+	ListUncached(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error)
 }
 
 type DefaultProvider struct {
@@ -67,11 +69,25 @@ func NewDefaultProvider(clk clock.Clock, versionProvider version.Provider, ssmPr
 	}
 }
 
-// List Returning a list of AMIs with its associated requirements
+// List returns a list of AMIs with their associated requirements, using the AMI
+// cache to avoid redundant DescribeImages calls.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error) {
+	return p.list(ctx, nodeClass, true)
+}
+
+// ListUncached is identical to List but bypasses the AMI cache read, forcing a
+// fresh DescribeImages call. It is used by the SSM invalidation controller,
+// which must observe up-to-date AMI deprecation status rather than a possibly
+// stale cached result. Freshly resolved AMIs are still written back to the cache
+// for subsequent List callers.
+func (p *DefaultProvider) ListUncached(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error) {
+	return p.list(ctx, nodeClass, false)
+}
+
+func (p *DefaultProvider) list(ctx context.Context, nodeClass *v1.EC2NodeClass, useCache bool) (AMIs, error) {
 	p.Lock()
 	defer p.Unlock()
-	amis, err := p.amis(ctx, nodeClass)
+	amis, err := p.amis(ctx, nodeClass, useCache)
 	if err != nil {
 		return nil, err
 	}
@@ -170,19 +186,27 @@ func (p *DefaultProvider) DescribeImageQueries(ctx context.Context, nodeClass *v
 }
 
 //nolint:gocyclo
-func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error) {
+func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass, useCache bool) (AMIs, error) {
 	queries, err := p.DescribeImageQueries(ctx, nodeClass)
 	if err != nil {
 		return nil, fmt.Errorf("getting AMI queries, %w", err)
 	}
-	hash := utils.GetNodeClassHash(nodeClass)
-	if images, ok := p.cache.Get(hash); ok {
-		// Ensure what's returned from this function is a deep-copy of AMIs so alterations
-		// to the data don't affect the original
-		return append(AMIs{}, images.(AMIs)...), nil
-	}
+	// Resolve each query independently and cache its result keyed on the query's
+	// owners and filters (a single DescribeImages call) rather than on the
+	// NodeClass identity. NodeClasses that resolve to the same query then share
+	// the cache entry, avoiding redundant DescribeImages calls (see #9063), while
+	// distinct queries — including ones that differ only by owners — never alias
+	// (see #8619).
 	images := map[uint64]AMI{}
 	for _, query := range queries {
+		key := imageQueryCacheKey(query)
+		if useCache {
+			if cached, ok := p.cache.Get(key); ok {
+				mergeAMIs(images, cached.(AMIs))
+				continue
+			}
+		}
+		queryImages := map[uint64]AMI{}
 		paginator := ec2.NewDescribeImagesPaginator(p.ec2api, query.DescribeImagesInput())
 		for paginator.HasMorePages() {
 			page, err := paginator.NextPage(ctx)
@@ -210,18 +234,51 @@ func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 						Deprecated:   candidateDeprecated,
 						Requirements: reqs,
 					}
-					if v, ok := images[reqsHash]; ok {
+					if v, ok := queryImages[reqsHash]; ok {
 						if cmpResult := compareAMI(v, ami); cmpResult <= 0 {
 							continue
 						}
 					}
-					images[reqsHash] = ami
+					queryImages[reqsHash] = ami
 				}
 			}
 		}
+		queryAMIs := AMIs(lo.Values(queryImages))
+		p.cache.SetDefault(key, queryAMIs)
+		mergeAMIs(images, queryAMIs)
 	}
-	p.cache.SetDefault(hash, AMIs(lo.Values(images)))
 	return lo.Values(images), nil
+}
+
+// mergeAMIs merges the given AMIs into the accumulator keyed by requirements
+// hash, keeping the preferred AMI (see compareAMI) when multiple AMIs share the
+// same set of requirements. Merging per-query results this way is equivalent to
+// resolving every query into a single map, since compareAMI defines a total
+// order per requirements hash.
+func mergeAMIs(into map[uint64]AMI, amis AMIs) {
+	for i := range amis {
+		reqsHash := lo.Must(hashstructure.Hash(amis[i].Requirements.NodeSelectorRequirements(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+		if v, ok := into[reqsHash]; ok {
+			if cmpResult := compareAMI(v, amis[i]); cmpResult <= 0 {
+				continue
+			}
+		}
+		into[reqsHash] = amis[i]
+	}
+}
+
+// imageQueryCacheKey returns a deterministic, collision-free cache key for a
+// DescribeImages query. The key incorporates both the resolved filters and the
+// owners so that queries which differ only by owner (for example, an AMI name
+// resolved against different accounts) never share a cache entry — critical to
+// avoid returning cross-account AMIs the user did not authorize. For alias
+// families the filters are SSM-resolved image-id filters, which uniquely
+// identify the family and version, so owners and filters are sufficient to
+// disambiguate queries without including KnownRequirements.
+func imageQueryCacheKey(query DescribeImageQuery) string {
+	owners := append([]string(nil), query.Owners...)
+	sort.Strings(owners)
+	return fmt.Sprintf("owners:%s\x1efilters:%s", strings.Join(owners, ","), utils.CanonicalFilterSetKey(query.Filters))
 }
 
 // MapToInstanceTypes returns a map of AMIIDs that are the most recent on creationDate to compatible instancetypes
