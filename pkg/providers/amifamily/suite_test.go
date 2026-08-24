@@ -680,8 +680,7 @@ var _ = Describe("AMIProvider", func() {
 			_, err := awsEnv.AMIProvider.List(ctx, nodeClass)
 			Expect(err).To(BeNil())
 
-			// Each name selector term is a distinct DescribeImages query and is
-			// therefore cached independently.
+			// Each name selector term is a distinct query, cached independently
 			Expect(awsEnv.AMICache.Items()).To(HaveLen(2))
 			cachedImages := amifamily.AMIs{}
 			for _, item := range awsEnv.AMICache.Items() {
@@ -803,8 +802,7 @@ var _ = Describe("AMIProvider", func() {
 			))
 
 			cacheItems := awsEnv.AMICache.Items()
-			// Caching is per query, so the AND filter set and each of the two OR
-			// filter sets are cached as independent entries.
+			// Caching is per query: one entry for the AND set, one for each OR set
 			Expect(cacheItems).To(HaveLen(3))
 			cachedImages := make([]amifamily.AMIs, 0, len(cacheItems))
 			for _, item := range cacheItems {
@@ -849,8 +847,6 @@ var _ = Describe("AMIProvider", func() {
 			_, err = awsEnv.AMIProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// Both NodeClasses resolve the same query and share a single cache entry,
-			// so only one DescribeImages call is made.
 			Expect(awsEnv.AMICache.Items()).To(HaveLen(1))
 			Expect(awsEnv.EC2API.CalledWithDescribeImagesInput.Len()).To(Equal(1))
 		})
@@ -873,15 +869,14 @@ var _ = Describe("AMIProvider", func() {
 			_, err = awsEnv.AMIProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// The queries share the same name filter but target different owners, so
-			// they must not share a cache entry — otherwise Karpenter could surface an
-			// AMI from an account the second NodeClass never authorized.
+			// Sharing a cache entry here would surface an AMI from an account the second
+			// NodeClass never authorized
 			Expect(awsEnv.AMICache.Items()).To(HaveLen(2))
 			Expect(awsEnv.EC2API.CalledWithDescribeImagesInput.Len()).To(Equal(2))
 		})
-		It("should observe fresh results via ListUncached even when the cache is populated", func() {
+		It("should observe fresh results with SkipCache even when the cache is populated", func() {
 			awsEnv.Clock.SetTime(time.Now())
-			// Populate the cache with a non-deprecated AMI.
+			// Populate the cache with a non-deprecated AMI
 			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
 				{
 					Name:         aws.String("ami-name-x"),
@@ -898,8 +893,7 @@ var _ = Describe("AMIProvider", func() {
 			Expect(amis[0].Deprecated).To(BeFalse())
 			Expect(awsEnv.AMICache.Items()).To(HaveLen(1))
 
-			// The AMI is now deprecated at the API. A cached List still returns the
-			// stale non-deprecated result...
+			// The AMI is now deprecated at the API, but a cached List still returns the stale result
 			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
 				{
 					Name:            aws.String("ami-name-x"),
@@ -915,10 +909,7 @@ var _ = Describe("AMIProvider", func() {
 			Expect(cached).To(HaveLen(1))
 			Expect(cached[0].Deprecated).To(BeFalse())
 
-			// ...while ListUncached bypasses the cache and observes the fresh
-			// deprecated status. This is what the SSM invalidation controller relies
-			// on to react to AMI deprecations.
-			fresh, err := awsEnv.AMIProvider.ListUncached(ctx, nodeClass)
+			fresh, err := awsEnv.AMIProvider.List(ctx, nodeClass, amifamily.SkipCache)
 			Expect(err).To(BeNil())
 			Expect(fresh).To(HaveLen(1))
 			Expect(fresh[0].Deprecated).To(BeTrue())

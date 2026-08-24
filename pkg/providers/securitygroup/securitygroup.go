@@ -72,23 +72,16 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 
 func (p *DefaultProvider) getSecurityGroups(ctx context.Context, nodeClass *v1.EC2NodeClass) ([]ec2types.SecurityGroup, error) {
 	filterSets := getFilterSets(nodeClass.Spec.SecurityGroupSelectorTerms)
-	// Results are cached per filter set (a single DescribeSecurityGroups call)
-	// rather than per NodeClass, so NodeClasses that share a selector term share
-	// the underlying cache entry and avoid redundant EC2 calls (see #9063).
-	// Keying per filter set also preserves the distinction between AND (multiple
-	// filters in one set) and OR (multiple sets), avoiding the hash collisions
-	// described in #8619.
-	securityGroups := map[string]ec2types.SecurityGroup{}
+	// Results are cached per filter set (one DescribeSecurityGroups call) rather than
+	// per NodeClass, so NodeClasses sharing a selector term share the cache entry (see #9063).
+	var securityGroups []ec2types.SecurityGroup
 	for _, filters := range filterSets {
-		key := utils.CanonicalFilterSetKey(filters)
+		key := fmt.Sprintf("%016x", utils.FilterSetHash(filters))
 		if cached, ok := p.cache.Get(key); ok {
-			cachedSecurityGroups := cached.([]ec2types.SecurityGroup)
-			for i := range cachedSecurityGroups {
-				securityGroups[lo.FromPtr(cachedSecurityGroups[i].GroupId)] = cachedSecurityGroups[i]
-			}
+			securityGroups = append(securityGroups, cached.([]ec2types.SecurityGroup)...)
 			continue
 		}
-		filterSetSecurityGroups := map[string]ec2types.SecurityGroup{}
+		var filterSetSecurityGroups []ec2types.SecurityGroup
 		paginator := ec2.NewDescribeSecurityGroupsPaginator(p.ec2api, &ec2.DescribeSecurityGroupsInput{
 			MaxResults: aws.Int32(500),
 			Filters:    filters,
@@ -98,16 +91,13 @@ func (p *DefaultProvider) getSecurityGroups(ctx context.Context, nodeClass *v1.E
 			if err != nil {
 				return nil, fmt.Errorf("describing security groups %+v, %w", filters, err)
 			}
-			for i := range output.SecurityGroups {
-				filterSetSecurityGroups[lo.FromPtr(output.SecurityGroups[i].GroupId)] = output.SecurityGroups[i]
-			}
+			filterSetSecurityGroups = append(filterSetSecurityGroups, output.SecurityGroups...)
 		}
-		p.cache.SetDefault(key, lo.Values(filterSetSecurityGroups))
-		for id, securityGroup := range filterSetSecurityGroups {
-			securityGroups[id] = securityGroup
-		}
+		p.cache.SetDefault(key, filterSetSecurityGroups)
+		securityGroups = append(securityGroups, filterSetSecurityGroups...)
 	}
-	return lo.Values(securityGroups), nil
+	// Ensure that all the security groups returned here are unique, since selector terms may overlap
+	return lo.UniqBy(securityGroups, func(s ec2types.SecurityGroup) string { return lo.FromPtr(s.GroupId) }), nil
 }
 
 func getFilterSets(terms []v1.SecurityGroupSelectorTerm) (res [][]ec2types.Filter) {

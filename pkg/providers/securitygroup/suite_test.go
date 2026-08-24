@@ -406,15 +406,13 @@ var _ = Describe("SecurityGroupProvider", func() {
 			}, securityGroups)
 
 			cacheItems := awsEnv.SecurityGroupCache.Items()
-			// Caching is per filter set, so there is one entry for the AND filter
-			// set and one entry for each of the two OR filter sets.
+			// Caching is per filter set: one entry for the AND set, one for each OR set
 			Expect(cacheItems).To(HaveLen(3))
 			// Extract cached security group arrays for comparison
 			cachedSecurityGroups := make([][]ec2types.SecurityGroup, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedSecurityGroups = append(cachedSecurityGroups, item.Object.([]ec2types.SecurityGroup))
 			}
-			// Each OR filter set is cached independently as a single-element result.
 			Expect(cachedSecurityGroups).To(ContainElement(
 				[]ec2types.SecurityGroup{
 					{
@@ -433,7 +431,6 @@ var _ = Describe("SecurityGroupProvider", func() {
 					},
 				},
 			))
-			// The AND filter set is cached as its own entry, distinct from the OR sets.
 			Expect(cachedSecurityGroups).To(ContainElement(
 				[]ec2types.SecurityGroup{
 					{
@@ -457,8 +454,6 @@ var _ = Describe("SecurityGroupProvider", func() {
 			_, err = awsEnv.SecurityGroupProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// The second NodeClass resolves the same filter set and is served from
-			// the shared cache entry, so only a single DescribeSecurityGroups call is made.
 			Expect(awsEnv.SecurityGroupCache.Items()).To(HaveLen(1))
 			Expect(awsEnv.EC2API.DescribeSecurityGroupsBehavior.Calls()).To(Equal(1))
 		})
@@ -479,8 +474,7 @@ var _ = Describe("SecurityGroupProvider", func() {
 			_, err = awsEnv.SecurityGroupProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// The {foo=bar} filter set is reused from the first NodeClass; only the
-			// new {baz=qux} filter set triggers an additional DescribeSecurityGroups call.
+			// Only the new {baz=qux} filter set triggers another call
 			Expect(awsEnv.SecurityGroupCache.Items()).To(HaveLen(2))
 			Expect(awsEnv.EC2API.DescribeSecurityGroupsBehavior.Calls()).To(Equal(2))
 		})

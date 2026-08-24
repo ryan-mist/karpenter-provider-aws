@@ -71,9 +71,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 			},
 		}
 	}) {
-		// Bypass the AMI cache so we observe fresh deprecation status rather than a
-		// possibly stale cached result.
-		resolvedAMIs, err := c.amiProvider.ListUncached(ctx, nodeClass)
+		// Skip the AMI cache so we observe fresh deprecation status
+		resolvedAMIs, err := c.amiProvider.List(ctx, nodeClass, amifamily.SkipCache)
 		if err != nil {
 			return reconciler.Result{}, err
 		}

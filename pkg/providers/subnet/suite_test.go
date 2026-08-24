@@ -421,15 +421,13 @@ var _ = Describe("SubnetProvider", func() {
 			}, subnets)
 
 			cacheItems := awsEnv.SubnetCache.Items()
-			// Caching is per filter set, so there is one entry for the AND filter
-			// set and one entry for each of the two OR filter sets.
+			// Caching is per filter set: one entry for the AND set, one for each OR set
 			Expect(cacheItems).To(HaveLen(3))
 			// Extract cached subnet arrays for comparison
 			cachedSubnets := make([][]ec2types.Subnet, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedSubnets = append(cachedSubnets, item.Object.([]ec2types.Subnet))
 			}
-			// Each OR filter set is cached independently as a single-element result.
 			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
@@ -448,7 +446,6 @@ var _ = Describe("SubnetProvider", func() {
 					},
 				},
 			))
-			// The AND filter set is cached as its own entry, distinct from the OR sets.
 			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
@@ -472,8 +469,6 @@ var _ = Describe("SubnetProvider", func() {
 			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// The second NodeClass resolves the same filter set and is served from
-			// the shared cache entry, so only a single DescribeSubnets call is made.
 			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(1))
 			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
 		})
@@ -494,8 +489,7 @@ var _ = Describe("SubnetProvider", func() {
 			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
 			Expect(err).To(BeNil())
 
-			// The {foo=bar} filter set is reused from the first NodeClass; only the
-			// new {baz=qux} filter set triggers an additional DescribeSubnets call.
+			// Only the new {baz=qux} filter set triggers another call
 			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(2))
 			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(2))
 		})

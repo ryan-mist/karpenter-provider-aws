@@ -15,11 +15,9 @@ limitations under the License.
 package utils
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -27,6 +25,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/awslabs/operatorpkg/serrors"
+	"github.com/mitchellh/hashstructure/v2"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
 	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
@@ -124,35 +123,24 @@ func GetTags(nodeClass *v1.EC2NodeClass, nodeClaim *karpv1.NodeClaim, clusterNam
 	return lo.Assign(nodeClass.Spec.Tags, staticTags), nil
 }
 
-// CanonicalFilterSetKey returns a deterministic, collision-free cache key for a
-// single resolved EC2 filter set. A filter set is the list of filters passed to
-// one Describe* call, which the EC2 API evaluates as a logical AND. Filters and
-// the values within each filter are sorted so that semantically identical filter
-// sets map to the same key regardless of the order the selector terms were
-// authored in, while any difference in filter names, values, or the number of
-// filters (i.e. AND grouping) produces a distinct key.
-//
-// This encoding is used to cache selector resolution per filter set rather than
-// per NodeClass, allowing NodeClasses that share a selector term to share the
-// underlying cache entry (see #9063). Unlike hashstructure with SlicesAsSets —
-// which collapsed nested AND/OR grouping and hashed slices containing duplicate
-// elements to zero (see #8619) — this preserves the exact structure of the
-// filter set, so distinct selectors can never alias.
-func CanonicalFilterSetKey(filters []ec2types.Filter) string {
-	// Marshal each filter independently (with its values sorted), then sort the
-	// encoded filters. Because each encoded filter is a self-delimiting JSON
-	// object, the concatenation is injective over the multiset of filters, and
-	// sorting makes it independent of filter ordering within the set.
-	encoded := make([]string, 0, len(filters))
-	for _, filter := range filters {
-		values := append([]string(nil), filter.Values...)
-		sort.Strings(values)
-		b, _ := json.Marshal(struct {
-			Name   string
-			Values []string
-		}{Name: aws.ToString(filter.Name), Values: values})
-		encoded = append(encoded, string(b))
+// FilterSetHash hashes the filters of a single Describe* call so that equivalent filter
+// sets share a cache key regardless of ordering. Duplicates are removed at both levels
+// first, since SlicesAsSets XORs set elements and duplicates would otherwise cancel and
+// alias distinct filter sets (see #8619).
+func FilterSetHash(filters []ec2types.Filter) uint64 {
+	type filter struct {
+		Name   string
+		Values []string
 	}
-	sort.Strings(encoded)
-	return strings.Join(encoded, "")
+	return lo.Must(hashstructure.Hash(
+		lo.UniqBy(
+			lo.Map(filters, func(f ec2types.Filter, _ int) filter {
+				return filter{Name: aws.ToString(f.Name), Values: lo.Uniq(f.Values)}
+			}),
+			func(f filter) uint64 {
+				return lo.Must(hashstructure.Hash(f, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+			},
+		),
+		hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true},
+	))
 }

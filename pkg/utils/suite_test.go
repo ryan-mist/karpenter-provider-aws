@@ -21,6 +21,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/samber/lo"
 
 	"github.com/aws/karpenter-provider-aws/pkg/utils"
 )
@@ -30,31 +31,40 @@ func TestUtils(t *testing.T) {
 	RunSpecs(t, "Utils Suite")
 }
 
-var _ = Describe("CanonicalFilterSetKey", func() {
+var _ = Describe("FilterSetHash", func() {
 	filter := func(name string, values ...string) ec2types.Filter {
 		return ec2types.Filter{Name: aws.String(name), Values: values}
 	}
+	hash := func(filters ...ec2types.Filter) uint64 {
+		return utils.FilterSetHash(filters)
+	}
 	It("is independent of the order of filters and of values within a filter", func() {
-		a := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1", "2"), filter("tag:b", "3")})
-		b := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "3"), filter("tag:a", "2", "1")})
-		Expect(a).To(Equal(b))
+		Expect(hash(filter("tag:a", "1", "2"), filter("tag:b", "3"))).
+			To(Equal(hash(filter("tag:b", "3"), filter("tag:a", "2", "1"))))
+	})
+	It("ignores duplicates, which select the same resources", func() {
+		Expect(hash(filter("subnet-id", "s-1", "s-1"))).To(Equal(hash(filter("subnet-id", "s-1"))))
+		Expect(hash(filter("subnet-id", "s-1", "s-2", "s-2"))).To(Equal(hash(filter("subnet-id", "s-1", "s-2"))))
+		Expect(hash(filter("tag:a", "1"), filter("tag:a", "1"))).To(Equal(hash(filter("tag:a", "1"))))
+	})
+	// SlicesAsSets XORs set elements, so without the dedup in FilterSetHash every filter
+	// set below would hash alike and a cache hit would return the wrong resources (#8619)
+	It("distinguishes filter sets that differ only by a duplicated value", func() {
+		Expect(lo.Uniq([]uint64{
+			hash(filter("subnet-id", "s-1", "s-1")),
+			hash(filter("subnet-id", "s-2", "s-2")),
+			hash(filter("subnet-id")),
+			hash(filter("subnet-id", "s-1", "s-2", "s-2")),
+		})).To(HaveLen(4))
 	})
 	It("distinguishes AND (one filter set) from OR (separate filter sets)", func() {
-		and := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1"), filter("tag:b", "2")})
-		orA := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1")})
-		orB := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "2")})
-		Expect(and).ToNot(Equal(orA))
-		Expect(and).ToNot(Equal(orB))
-		Expect(orA).ToNot(Equal(orB))
+		Expect(lo.Uniq([]uint64{
+			hash(filter("tag:a", "1"), filter("tag:b", "2")),
+			hash(filter("tag:a", "1")),
+			hash(filter("tag:b", "2")),
+		})).To(HaveLen(3))
 	})
 	It("distinguishes different filter values", func() {
-		Expect(utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1")})).
-			ToNot(Equal(utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "2")})))
-	})
-	It("does not collide on filter sets containing duplicate values (unlike SlicesAsSets)", func() {
-		dup := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:a", "1", "1")})
-		other := utils.CanonicalFilterSetKey([]ec2types.Filter{filter("tag:b", "2", "2")})
-		Expect(dup).ToNot(Equal(other))
-		Expect(dup).ToNot(BeEmpty())
+		Expect(hash(filter("tag:a", "1"))).ToNot(Equal(hash(filter("tag:a", "2"))))
 	})
 })
