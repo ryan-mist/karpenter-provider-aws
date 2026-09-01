@@ -406,28 +406,31 @@ var _ = Describe("SecurityGroupProvider", func() {
 			}, securityGroups)
 
 			cacheItems := awsEnv.SecurityGroupCache.Items()
-			// There should be 2 cache entries one for each semantic.
-			Expect(cacheItems).To(HaveLen(2))
+			// Caching is per filter set: one entry for the AND set, one for each OR set
+			Expect(cacheItems).To(HaveLen(3))
 			// Extract cached security group arrays for comparison
 			cachedSecurityGroups := make([][]ec2types.SecurityGroup, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedSecurityGroups = append(cachedSecurityGroups, item.Object.([]ec2types.SecurityGroup))
 			}
-			// Expect cache to contain result of both look ups.
-			Expect(cachedSecurityGroups).To(ContainElement(ContainElements(
+			Expect(cachedSecurityGroups).To(ContainElement(
 				[]ec2types.SecurityGroup{
 					{
 						GroupId:   aws.String("test-sg-1"),
 						GroupName: aws.String("test-sgName-1"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-1"), Value: aws.String("tag-value-1")}},
 					},
+				},
+			))
+			Expect(cachedSecurityGroups).To(ContainElement(
+				[]ec2types.SecurityGroup{
 					{
 						GroupId:   aws.String("test-sg-2"),
 						GroupName: aws.String("test-sgName-2"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-2"), Value: aws.String("tag-value-2")}},
 					},
 				},
-			)))
+			))
 			Expect(cachedSecurityGroups).To(ContainElement(
 				[]ec2types.SecurityGroup{
 					{
@@ -437,6 +440,43 @@ var _ = Describe("SecurityGroupProvider", func() {
 					},
 				},
 			))
+		})
+		It("should share a cache entry across NodeClasses with an identical selector term", func() {
+			awsEnv.EC2API.DescribeSecurityGroupsBehavior.Output.Set(&ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{
+				{GroupId: aws.String("test-sg-1"), GroupName: aws.String("test-sgName-1")},
+			}})
+			nodeClass.Spec.SecurityGroupSelectorTerms = []v1.SecurityGroupSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SecurityGroupProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SecurityGroupSelectorTerms = []v1.SecurityGroupSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err = awsEnv.SecurityGroupProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			Expect(awsEnv.SecurityGroupCache.Items()).To(HaveLen(1))
+			Expect(awsEnv.EC2API.DescribeSecurityGroupsBehavior.Calls()).To(Equal(1))
+		})
+		It("should reuse the cache entry for a shared selector term across NodeClasses with partially overlapping selectors", func() {
+			awsEnv.EC2API.DescribeSecurityGroupsBehavior.Output.Set(&ec2.DescribeSecurityGroupsOutput{SecurityGroups: []ec2types.SecurityGroup{
+				{GroupId: aws.String("test-sg-1"), GroupName: aws.String("test-sgName-1")},
+			}})
+			nodeClass.Spec.SecurityGroupSelectorTerms = []v1.SecurityGroupSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SecurityGroupProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+			Expect(awsEnv.EC2API.DescribeSecurityGroupsBehavior.Calls()).To(Equal(1))
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SecurityGroupSelectorTerms = []v1.SecurityGroupSelectorTerm{
+				{Tags: map[string]string{"foo": "bar"}},
+				{Tags: map[string]string{"baz": "qux"}},
+			}
+			_, err = awsEnv.SecurityGroupProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			// Only the new {baz=qux} filter set triggers another call
+			Expect(awsEnv.SecurityGroupCache.Items()).To(HaveLen(2))
+			Expect(awsEnv.EC2API.DescribeSecurityGroupsBehavior.Calls()).To(Equal(2))
 		})
 	})
 	It("should not cause data races when calling List() simultaneously", func() {
