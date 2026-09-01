@@ -3944,7 +3944,6 @@ func (r *fakeOfferingResolver) ResolveOfferings(
 	_ sets.Set[string],
 	_ sets.Set[string],
 	_ *placementgroup.PlacementGroup,
-	_ *offering.ResolveContext,
 ) corecloudprovider.Offerings {
 	r.called = true
 	baseOfferings := make([]*corecloudprovider.Offering, len(offerings))
