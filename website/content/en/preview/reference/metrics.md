@@ -997,6 +997,59 @@ Total number of terminal reconciliation errors per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_reconcile_total`
 Total number of reconciliations per controller
@@ -1004,6 +1057,59 @@ Total number of reconciliations per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `result` — The outcome of the reconcile call.
     - `success`
     - `error`
@@ -1016,6 +1122,59 @@ Total number of reconciliation timeouts per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_reconcile_time_seconds`
 Length of time per reconciliation per controller
@@ -1023,6 +1182,59 @@ Length of time per reconciliation per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_reconcile_panics_total`
 Total number of reconciliation panics per controller
@@ -1030,6 +1242,59 @@ Total number of reconciliation panics per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_reconcile_errors_total`
 Total number of reconciliation errors per controller
@@ -1037,6 +1302,59 @@ Total number of reconciliation errors per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_max_concurrent_reconciles`
 Maximum number of concurrent reconciles per controller
@@ -1044,6 +1362,59 @@ Maximum number of concurrent reconciles per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ### `controller_runtime_conversion_webhook_panics_total`
 Total number of conversion webhook panics
@@ -1056,6 +1427,59 @@ Number of currently used workers per controller
 - Stability Level: STABLE
 - Dimensions:
   - `controller` — The name of the controller that owns the reconcile loop.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
 
 ## Workqueue Metrics
 
@@ -1065,6 +1489,59 @@ How long in seconds processing an item from workqueue takes.
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ### `workqueue_unfinished_work_seconds`
@@ -1073,6 +1550,59 @@ How many seconds of work has been done that is in progress and hasn't been obser
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ### `workqueue_retries_total`
@@ -1081,6 +1611,59 @@ Total number of items added to the workqueue with a non-zero delay (rate-limited
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ### `workqueue_queue_duration_seconds`
@@ -1089,6 +1672,59 @@ How long in seconds an item stays in workqueue before being requested
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ### `workqueue_longest_running_processor_seconds`
@@ -1097,6 +1733,59 @@ How many seconds has the longest running processor for workqueue been running.
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ### `workqueue_depth`
@@ -1105,6 +1794,59 @@ Current depth of workqueue by workqueue and priority
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
   - `priority` — The priority band of the enqueued item.
 
@@ -1114,6 +1856,59 @@ Total number of adds handled by workqueue
 - Stability Level: STABLE
 - Dimensions:
   - `name` — The name of the workqueue, typically the owning controller's name.
+    - `capacitybuffer`
+    - `capacityreservation.capacitytype`
+    - `capacityreservation.expiration`
+    - `cloudprovider.metrics`
+    - `disruption`
+    - `disruption.queue`
+    - `dynamicresources.deviceallocation`
+    - `eviction-queue`
+    - `instance.garbagecollection`
+    - `instanceprofile.garbagecollection`
+    - `interruption`
+    - `interruption.instancestatus`
+    - `metrics.node`
+    - `metrics.nodepool`
+    - `metrics.pod`
+    - `node.health`
+    - `node.hydration`
+    - `node.termination`
+    - `nodeclaim.consistency`
+    - `nodeclaim.disruption`
+    - `nodeclaim.expiration`
+    - `nodeclaim.garbagecollection`
+    - `nodeclaim.hydration`
+    - `nodeclaim.lifecycle`
+    - `nodeclaim.podevents`
+    - `nodeclaim.tagging`
+    - `nodeclass`
+    - `nodeclass.hash`
+    - `nodeoverlay.controller`
+    - `nodepool.counter`
+    - `nodepool.hash`
+    - `nodepool.readiness`
+    - `nodepool.registrationhealth`
+    - `nodepool.validation`
+    - `providers.instancetype`
+    - `providers.instancetype.capacity`
+    - `providers.pricing`
+    - `providers.ssm.invalidation`
+    - `providers.version`
+    - `provisioner`
+    - `provisioner.trigger.node`
+    - `provisioner.trigger.pod`
+    - `state.daemonset`
+    - `state.node`
+    - `state.nodeclaim`
+    - `state.nodeclaimgc`
+    - `state.nodepool`
+    - `state.pod`
+    - `state.pricing`
+    - `static.deprovisioning`
+    - `static.provisioning`
+    - `vpa.prediction`
+    - `zonalshift`
   - `controller` — The name of the controller that emitted the metric.
 
 ## Termination Metrics
