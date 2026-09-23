@@ -142,6 +142,12 @@ var (
 	// matching labelScope resolves here first, so a reused name (e.g. `reason`) gets
 	// its own code base's docs.
 	scopedLabelRegistry = map[string]map[string]labelInfo{}
+	// controllerNames are the reconcile-controller names harvested from the parsed
+	// sources (see collectControllerNames), used to enumerate the values of the
+	// `controller`/`name` dimension of controller-runtime & workqueue metrics.
+	// Keyed by name so a controller registered across both code bases lists once;
+	// help is populated when a controller documents itself (see collectControllerNames).
+	controllerNames = map[string]valueInfo{}
 )
 
 // labelScopeForFile returns the scope a Label declaration belongs to, based on
@@ -287,6 +293,10 @@ func main() {
 	collectLabels(allPackages)
 	// must run after collectLabels so referenced Label vars are resolved.
 	collectLabelSlices(allPackages)
+	// harvest reconcile-controller names to enumerate the `controller`/`name`
+	// dimension values; must run before rendering.
+	collectControllerNames(allPackages)
+	injectControllerNameValues()
 	allMetrics := getMetricsFromPackages(allPackages...)
 
 	// per-object status metrics are created at runtime from status.NewController[T]()
@@ -467,7 +477,7 @@ func getPackages(root string) []*ast.Package {
 		}
 		pkgs, err := parser.ParseDir(fset, path, func(info fs.FileInfo) bool {
 			return !strings.HasSuffix(info.Name(), "_test.go")
-		}, parser.AllErrors)
+		}, parser.AllErrors|parser.ParseComments)
 		if err != nil {
 			log.Fatalf("error parsing, %s", err)
 		}
@@ -980,6 +990,120 @@ func collectFuncReturns(packages []*ast.Package) {
 			}
 		}
 	}
+}
+
+// collectControllerNames harvests reconcile-controller names from the parsed
+// sources so the `controller`/`name` dimension of controller-runtime & workqueue
+// metrics can enumerate them, without every controller having to register its name
+// in a central list. It reads the two shapes a controller's name takes:
+//
+//   - the argument to controller-runtime's `.Named("literal")` builder call (the
+//     authoritative registration), and
+//   - a `func (…) Name() string { return "literal" }` method (referenced as
+//     `.Named(c.Name())`).
+//
+// Scoped to files under a "/controllers/" directory so unrelated `Name()` methods
+// (providers, options types, …) don't leak in. New controllers are picked up
+// automatically because registering a controller requires one of these forms.
+//
+// Extensible to per-controller help: a controller opts in by prefixing the doc
+// comment on its Name() method with the controllerHelpPrefix sentinel; the remaining
+// text becomes valueInfo.help, which the renderer already emits per value. An explicit
+// sentinel (rather than scraping the raw godoc) avoids surfacing incidental comments —
+// e.g. a misplaced Reconcile godoc — as a controller description. Controllers that
+// don't opt in list with no description.
+func collectControllerNames(packages []*ast.Package) {
+	add := func(name, help string) {
+		if name == "" {
+			return
+		}
+		// first help wins; a later bare reference doesn't clear an existing description.
+		if existing, ok := controllerNames[name]; ok && existing.help != "" {
+			return
+		}
+		controllerNames[name] = valueInfo{name: name, help: help}
+	}
+	for _, pkg := range packages {
+		for _, filePath := range slices.Sorted(maps.Keys(pkg.Files)) {
+			if !strings.Contains(filePath, "/controllers/") {
+				continue
+			}
+			file := pkg.Files[filePath]
+			// (a) Name() methods: `func (…) Name() string { return "literal" }`. The
+			// doc comment (if any) becomes the controller's help.
+			for _, decl := range file.Decls {
+				fd, ok := decl.(*ast.FuncDecl)
+				if !ok || fd.Recv == nil || fd.Name.Name != "Name" || fd.Body == nil || len(fd.Body.List) != 1 {
+					continue
+				}
+				ret, ok := fd.Body.List[0].(*ast.ReturnStmt)
+				if !ok || len(ret.Results) != 1 {
+					continue
+				}
+				if name, ok := resolveStringExpr(ret.Results[0]); ok {
+					add(name, controllerHelpFromDoc(fd.Doc))
+				}
+			}
+			// (b) `.Named("literal")` builder calls (controllers with no Name() method).
+			ast.Inspect(file, func(n ast.Node) bool {
+				ce, ok := n.(*ast.CallExpr)
+				if !ok || len(ce.Args) == 0 {
+					return true
+				}
+				sel, ok := ce.Fun.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Named" {
+					return true
+				}
+				if name, ok := resolveStringExpr(ce.Args[0]); ok {
+					add(name, "")
+				}
+				return true
+			})
+		}
+	}
+}
+
+// injectControllerNameValues assigns the harvested controller names, sorted, as the
+// enumerated values of the controller-identifying dimensions of the controller-runtime
+// and workqueue metrics — the dimensions whose value set is exactly "every registered
+// controller". Left untouched when no names resolved.
+func injectControllerNameValues() {
+	if len(controllerNames) == 0 {
+		return
+	}
+	values := lo.Values(controllerNames)
+	sort.Slice(values, func(i, j int) bool { return values[i].name < values[j].name })
+	for subsystem, dim := range map[string]string{
+		"controller_runtime": "controller",
+		"workqueue":          "name",
+	} {
+		if inj, ok := labelInjections[subsystem]; ok {
+			if li, ok := inj[dim]; ok {
+				li.values = values
+				inj[dim] = li
+			}
+		}
+	}
+}
+
+// controllerHelpPrefix is the opt-in marker a controller puts at the start of its
+// Name() doc comment to have the remaining text documented as the controller's help.
+const controllerHelpPrefix = "Description:"
+
+// controllerHelpFromDoc returns the opt-in help from a Name() doc comment, or "" when
+// the comment is absent or not marked with controllerHelpPrefix. Only marked comments
+// count, so incidental godoc (e.g. a stray "Reconcile ..." line) is never mistaken for
+// a controller description.
+func controllerHelpFromDoc(cg *ast.CommentGroup) string {
+	if cg == nil {
+		return ""
+	}
+	text := strings.TrimSpace(cg.Text())
+	if !strings.HasPrefix(text, controllerHelpPrefix) {
+		return ""
+	}
+	// collapse the (possibly multi-line) remainder into one line of help.
+	return strings.Join(strings.Fields(strings.TrimPrefix(text, controllerHelpPrefix)), " ")
 }
 
 func funcCallName(fun ast.Expr) string {
