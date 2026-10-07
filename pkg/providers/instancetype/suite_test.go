@@ -3233,6 +3233,24 @@ var _ = Describe("InstanceTypeProvider", func() {
 				Entry("when AMI is AL2023", v1.AMIFamilyAL2023, "al2023@latest", false),
 				Entry("when AMI is BottleRocket", v1.AMIFamilyBottlerocket, "bottlerocket@latest", true),
 			)
+			It("should isolate cached offering availability by AMI family", func() {
+				availableOfferings := func(amiFamily string, alias string) corecloudprovider.Offerings {
+					nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: alias}}
+					nodeClass.Spec.AMIFamily = lo.ToPtr(amiFamily)
+					ExpectApplied(ctx, env.Client, nodeClass)
+					instanceTypes, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
+					Expect(err).ToNot(HaveOccurred())
+					a1InstanceType, ok := lo.Find(instanceTypes, func(it *corecloudprovider.InstanceType) bool {
+						return it.Name == "a1.medium"
+					})
+					Expect(ok).To(BeTrue())
+					return a1InstanceType.Offerings.Available()
+				}
+
+				Expect(availableOfferings(v1.AMIFamilyBottlerocket, "bottlerocket@latest")).ToNot(BeEmpty())
+				Expect(availableOfferings(v1.AMIFamilyAL2023, "al2023@latest")).To(BeEmpty())
+				Expect(availableOfferings(v1.AMIFamilyBottlerocket, "bottlerocket@latest")).ToNot(BeEmpty())
+			})
 		})
 		Context("Network Interfaces", func() {
 			It("should mark instance type offering as available when it supports network interface configuration", func() {
