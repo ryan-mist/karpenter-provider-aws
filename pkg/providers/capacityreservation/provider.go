@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -36,7 +37,9 @@ type Provider interface {
 	GetAvailableInstanceCount(string) int
 	SetAvailableInstanceCount(string, int)
 	MarkLaunched(string)
-	MarkTerminated(string)
+	// MarkTerminated credits a slot back to the reservation for the given (terminated) instance. It's idempotent per
+	// instance: core calls CloudProvider.Delete more than once after an instance is gone.
+	MarkTerminated(reservationID, instanceID string)
 }
 
 type DefaultProvider struct {
@@ -56,8 +59,9 @@ func NewProvider(
 ) *DefaultProvider {
 	return &DefaultProvider{
 		availabilityCache: availabilityCache{
-			cache: reservationAvailabilityCache,
-			clk:   clk,
+			cache:      reservationAvailabilityCache,
+			terminated: cache.New(terminatedInstanceTTL, time.Minute),
+			clk:        clk,
 		},
 		ec2api:           ec2api,
 		clk:              clk,

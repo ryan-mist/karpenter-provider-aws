@@ -104,10 +104,17 @@ func (q *Query) DescribeCapacityReservationsInput() *ec2.DescribeCapacityReserva
 	}
 }
 
+// terminatedInstanceTTL bounds how long we remember that an instance's slot has already been credited back. Core calls
+// CloudProvider.Delete repeatedly once the instance is gone (node termination, then the NodeClaim finalizer, plus any
+// conflict retries), so this only has to outlive that flow.
+const terminatedInstanceTTL = time.Hour
+
 type availabilityCache struct {
 	mu    sync.RWMutex
 	cache *cache.Cache
-	clk   clock.Clock
+	// terminated records instance IDs whose termination has already been credited, so MarkTerminated is idempotent.
+	terminated *cache.Cache
+	clk        clock.Clock
 }
 
 type availabilityCacheEntry struct {
@@ -147,13 +154,19 @@ func (c *availabilityCache) MarkLaunched(reservationID string) {
 	}
 }
 
-func (c *availabilityCache) MarkTerminated(reservationID string) {
+func (c *availabilityCache) MarkTerminated(reservationID, instanceID string) {
 	// We don't do a time based comparison for CountTerminated because the reservation becomes available some time between
 	// the termination call and the instance state transitioning to terminated. This can be a pretty big gap, so a time
 	// based comparison would have limited value. In the worst case, this can result in us overestimating the available
 	// capacity, but we'd rather overestimate than underestimate.
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// Credit each instance at most once: CloudProvider.Delete returns NotFound on every call after the instance is gone,
+	// and counting each of those would report phantom slots until the next sync from EC2.
+	if _, ok := c.terminated.Get(instanceID); ok {
+		return
+	}
+	c.terminated.SetDefault(instanceID, struct{}{})
 	entry, ok := c.cache.Get(reservationID)
 	if !ok {
 		return
