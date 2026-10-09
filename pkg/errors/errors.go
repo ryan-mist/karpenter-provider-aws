@@ -51,8 +51,7 @@ var (
 	)
 
 	reservationCapacityExceededErrorCode = "ReservationCapacityExceeded"
-	// capacityReservationStateUnavailableErrorCode is returned while an interruptible capacity reservation is being
-	// reclaimed: EC2 still reports available instances but rejects every launch into it until the reclaim completes.
+	// returned when launching into an interruptible capacity reservation that is being reclaimed
 	capacityReservationStateUnavailableErrorCode = "InvalidCapacityReservationState.Unavailable"
 
 	// unfulfillableCapacityErrorCodes signify that capacity is temporarily unable to be launched
