@@ -37,8 +37,7 @@ type Provider interface {
 	GetAvailableInstanceCount(string) int
 	SetAvailableInstanceCount(string, int)
 	MarkLaunched(string)
-	// MarkTerminated credits a slot back to the reservation for the given (terminated) instance. It's idempotent per
-	// instance: core calls CloudProvider.Delete more than once after an instance is gone.
+	// MarkTerminated returns instanceID's slot to the reservation. Repeat calls for the same instance are no-ops.
 	MarkTerminated(reservationID, instanceID string)
 }
 
