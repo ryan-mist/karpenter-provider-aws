@@ -51,6 +51,9 @@ var (
 	)
 
 	reservationCapacityExceededErrorCode = "ReservationCapacityExceeded"
+	// capacityReservationStateUnavailableErrorCode is returned while an interruptible capacity reservation is being
+	// reclaimed: EC2 still reports available instances but rejects every launch into it until the reclaim completes.
+	capacityReservationStateUnavailableErrorCode = "InvalidCapacityReservationState.Unavailable"
 
 	// unfulfillableCapacityErrorCodes signify that capacity is temporarily unable to be launched
 	unfulfillableCapacityErrorCodes = sets.New(
@@ -63,6 +66,7 @@ var (
 		"MaxFleetCountExceeded",
 		"SpotMaxPriceTooLow",
 		reservationCapacityExceededErrorCode,
+		capacityReservationStateUnavailableErrorCode,
 	)
 )
 
