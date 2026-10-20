@@ -52,6 +52,7 @@ During the **Active Support** phase, the following categories of fixes are eligi
 | **Workload availability impact** | Bugs that cause running workloads to become unavailable or prevent new workloads from being scheduled | Incorrect node termination, premature drain ignoring disruption budgets, nodes failing to launch for valid workloads |
 | **Kubernetes compatibility** | Fixes required to maintain compatibility with Kubernetes minor and patch releases within the LTS version's declared K8s support range | A K8s minor release (e.g., 1.30 -> 1.31) changes behavior that breaks Karpenter's node lifecycle |
 | **Observability regressions that mask availability or security issues** | Fixes for bugs where broken metrics, logs, or events prevent users from detecting real availability or security problems | Prometheus metrics for node health silently stop emitting, disruption events no longer surface |
+| **Performance improvements** | Improvements to scheduling, provisioning, or disruption performance | Scheduling latency, memory usage, batching efficiency, controller throughput |
 
 During the **Maintenance Mode** phase, only security vulnerabilities (in Karpenter code and dependencies) are backported.
 
@@ -61,7 +62,6 @@ The following are **not backported** to supported LTS releases. Users seeking th
 
 | Category | Examples |
 | --- | --- |
-| **Performance improvements** | Scheduling latency, memory usage, batching efficiency, controller throughput |
 | **Cost optimization** | Improved bin-packing, better consolidation heuristics, smarter instance selection |
 | **New features and API additions** | New capabilities are delivered in new minor releases |
 | **Support for new cloud provider capabilities** | New instance types, new availability zones, new cloud APIs |
