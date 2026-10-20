@@ -24,6 +24,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
@@ -44,7 +45,19 @@ import (
 )
 
 type Provider interface {
-	List(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error)
+	// Resolves AMIs from a cache or EC2. This defaults to cache, use SkipCache to force an EC2 lookup.
+	List(ctx context.Context, nodeClass *v1.EC2NodeClass, opts ...ListOptions) (AMIs, error)
+}
+
+// listOptions is named to avoid collision with Options, the static launch template parameters
+type listOptions struct {
+	SkipCache bool
+}
+
+type ListOptions = option.Function[listOptions]
+
+var SkipCache = func(opts *listOptions) {
+	opts.SkipCache = true
 }
 
 type DefaultProvider struct {
@@ -67,11 +80,10 @@ func NewDefaultProvider(clk clock.Clock, versionProvider version.Provider, ssmPr
 	}
 }
 
-// List Returning a list of AMIs with its associated requirements
-func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error) {
+func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1.EC2NodeClass, opts ...ListOptions) (AMIs, error) {
 	p.Lock()
 	defer p.Unlock()
-	amis, err := p.amis(ctx, nodeClass)
+	amis, err := p.amis(ctx, nodeClass, option.Resolve(opts...).SkipCache)
 	if err != nil {
 		return nil, err
 	}
@@ -170,19 +182,23 @@ func (p *DefaultProvider) DescribeImageQueries(ctx context.Context, nodeClass *v
 }
 
 //nolint:gocyclo
-func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error) {
+func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass, skipCache bool) (AMIs, error) {
 	queries, err := p.DescribeImageQueries(ctx, nodeClass)
 	if err != nil {
 		return nil, fmt.Errorf("getting AMI queries, %w", err)
 	}
-	hash := utils.GetNodeClassHash(nodeClass)
-	if images, ok := p.cache.Get(hash); ok {
-		// Ensure what's returned from this function is a deep-copy of AMIs so alterations
-		// to the data don't affect the original
-		return append(AMIs{}, images.(AMIs)...), nil
-	}
+	// Each query is cached independently (one DescribeImages call), so NodeClasses
+	// resolving to the same query share the cache entry (see #9063).
 	images := map[uint64]AMI{}
 	for _, query := range queries {
+		key := imageQueryCacheKey(query)
+		if !skipCache {
+			if cached, ok := p.cache.Get(key); ok {
+				mergeAMIs(images, cached.(AMIs))
+				continue
+			}
+		}
+		queryImages := map[uint64]AMI{}
 		paginator := ec2.NewDescribeImagesPaginator(p.ec2api, query.DescribeImagesInput())
 		for paginator.HasMorePages() {
 			page, err := paginator.NextPage(ctx)
@@ -210,18 +226,42 @@ func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 						Deprecated:   candidateDeprecated,
 						Requirements: reqs,
 					}
-					if v, ok := images[reqsHash]; ok {
+					if v, ok := queryImages[reqsHash]; ok {
 						if cmpResult := compareAMI(v, ami); cmpResult <= 0 {
 							continue
 						}
 					}
-					images[reqsHash] = ami
+					queryImages[reqsHash] = ami
 				}
 			}
 		}
+		queryAMIs := AMIs(lo.Values(queryImages))
+		p.cache.SetDefault(key, queryAMIs)
+		mergeAMIs(images, queryAMIs)
 	}
-	p.cache.SetDefault(hash, AMIs(lo.Values(images)))
 	return lo.Values(images), nil
+}
+
+// mergeAMIs merges amis into the accumulator keyed by requirements hash, keeping the
+// preferred AMI (see compareAMI) when multiple AMIs share a set of requirements.
+func mergeAMIs(into map[uint64]AMI, amis AMIs) {
+	for i := range amis {
+		reqsHash := lo.Must(hashstructure.Hash(amis[i].Requirements.NodeSelectorRequirements(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+		if v, ok := into[reqsHash]; ok {
+			if cmpResult := compareAMI(v, amis[i]); cmpResult <= 0 {
+				continue
+			}
+		}
+		into[reqsHash] = amis[i]
+	}
+}
+
+// imageQueryCacheKey keys a DescribeImages query on its owners as well as its filters.
+// Sharing an entry between queries that differ only by owner would surface AMIs from an
+// account the user never authorized.
+func imageQueryCacheKey(query DescribeImageQuery) string {
+	ownersHash := lo.Must(hashstructure.Hash(lo.Uniq(query.Owners), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+	return fmt.Sprintf("%016x-%016x", ownersHash, utils.FilterSetHash(query.Filters))
 }
 
 // MapToInstanceTypes returns a map of AMIIDs that are the most recent on creationDate to compatible instancetypes
