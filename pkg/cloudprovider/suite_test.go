@@ -2120,6 +2120,93 @@ var _ = Describe("CloudProvider", func() {
 			Entry("when the capacity reservation type is capacity-block", v1.CapacityReservationTypeCapacityBlock, false),
 		)
 	})
+	// A full reservation is reported as Available=true with ReservationCapacity=0. With the
+	// default preferencePolicy (Respect), a pod that only prefers reserved capacity must relax that preference and fall back
+	// to on-demand rather than being deferred until the reservation frees up.
+	Context("Full Capacity Reservations", func() {
+		const reservationID = "cr-m5.large-1a-full"
+		BeforeEach(func() {
+			cr := ec2types.CapacityReservation{
+				AvailabilityZone:       lo.ToPtr("test-zone-1a"),
+				InstanceType:           lo.ToPtr("m5.large"),
+				OwnerId:                lo.ToPtr("012345678901"),
+				InstanceMatchCriteria:  ec2types.InstanceMatchCriteriaTargeted,
+				CapacityReservationId:  lo.ToPtr(reservationID),
+				AvailableInstanceCount: lo.ToPtr[int32](0),
+				State:                  ec2types.CapacityReservationStateActive,
+				ReservationType:        ec2types.CapacityReservationTypeDefault,
+				Interruptible:          lo.ToPtr(false),
+			}
+			awsEnv.CapacityReservationProvider.SetAvailableInstanceCount(reservationID, 0)
+			awsEnv.EC2API.DescribeCapacityReservationsOutput.Set(&ec2.DescribeCapacityReservationsOutput{
+				CapacityReservations: []ec2types.CapacityReservation{cr},
+			})
+			nodeClass.Spec.CapacityReservationSelectorTerms = []v1.CapacityReservationSelectorTerm{{ID: reservationID}}
+			nodeClass.Status.CapacityReservations = []v1.CapacityReservation{lo.Must(v1.CapacityReservationFromEC2(awsEnv.Clock, &cr))}
+			nodePool.Spec.Template.Spec.Requirements = []karpv1.NodeSelectorRequirementWithMinValues{
+				{
+					Key:      karpv1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeOnDemand},
+				},
+				{
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"m5.large"},
+				},
+				{
+					Key:      corev1.LabelTopologyZone,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"test-zone-1a"},
+				},
+			}
+		})
+		DescribeTable("should fall back to on-demand",
+			func(preferReserved bool) {
+				pod := coretest.UnschedulablePod()
+				if preferReserved {
+					pod.Spec.Affinity = &corev1.Affinity{NodeAffinity: &corev1.NodeAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{{
+							Weight: 100,
+							Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
+								Key:      karpv1.CapacityTypeLabelKey,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{karpv1.CapacityTypeReserved},
+							}}},
+						}},
+					}}
+				}
+				ExpectApplied(ctx, env.Client, nodePool, nodeClass, pod)
+				ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+				node := ExpectScheduled(ctx, env.Client, pod)
+				Expect(node.Labels).To(HaveKeyWithValue(karpv1.CapacityTypeLabelKey, karpv1.CapacityTypeOnDemand))
+				Expect(node.Labels).ToNot(HaveKey(corecloudprovider.ReservationIDLabel))
+				ncs := ExpectNodeClaims(ctx, env.Client)
+				Expect(ncs).To(HaveLen(1))
+				Expect(ncs[0].Labels).To(HaveKeyWithValue(karpv1.CapacityTypeLabelKey, karpv1.CapacityTypeOnDemand))
+				Expect(ncs[0].Labels).ToNot(HaveKey(corecloudprovider.ReservationIDLabel))
+				Expect(lo.ContainsBy(ncs[0].Spec.Requirements, func(r karpv1.NodeSelectorRequirementWithMinValues) bool {
+					return r.Key == corecloudprovider.ReservationIDLabel
+				})).To(BeFalse())
+				Expect(awsEnv.CapacityReservationProvider.GetAvailableInstanceCount(reservationID)).To(Equal(0))
+			},
+			Entry("when the pod prefers reserved capacity", true),
+			Entry("when the pod has no capacity type preference", false),
+		)
+		It("should not provision when the pod requires reserved capacity", func() {
+			pod := coretest.UnschedulablePod(coretest.PodOptions{
+				NodeRequirements: []corev1.NodeSelectorRequirement{{
+					Key:      karpv1.CapacityTypeLabelKey,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{karpv1.CapacityTypeReserved},
+				}},
+			})
+			ExpectApplied(ctx, env.Client, nodePool, nodeClass, pod)
+			ExpectProvisioned(ctx, env.Client, cluster, cloudProvider, prov, pod)
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(BeEmpty())
+		})
+	})
 })
 
 func ExpectLaunchTemplateNetworkInterfaces(ltInput *ec2.CreateLaunchTemplateInput, allEFA bool, expectedNetworkInterfaces []*v1.NetworkInterface) {

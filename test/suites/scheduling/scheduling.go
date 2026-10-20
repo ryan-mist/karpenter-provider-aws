@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
@@ -966,6 +967,102 @@ func RegisterTests(minValuesPolicy options.MinValuesPolicy) bool {
 				Expect(reservedCount).To(Equal(1))
 				Env.EventuallyExpectNodeCount("==", 2)
 			})
+			// The existing fallback test above exhausts a reservation within a
+			// single scheduling loop. This one fills the reservation first and only then creates another pod, so the scheduler
+			// sees a reserved offering that is available but has no remaining capacity. With the default preferencePolicy
+			// (Respect), a pod that only *prefers* reserved capacity must relax that preference and fall back to on-demand, the
+			// same as a pod without the preference.
+			DescribeTable("should fall back to on-demand once a reservation is full",
+				func(preferReserved bool) {
+					// Use a dedicated reservation so filling it can't interfere with the reservations shared by the other specs in
+					// this ordered container.
+					reservation := Env.ExpectCapacityReservationCreated(1)
+					DeferCleanup(func() {
+						environmentaws.ExpectCapacityReservationsCanceled(Env.Context, Env.EC2API, reservation.ID)
+					})
+					NodeClass.Spec.CapacityReservationSelectorTerms = []v1.CapacityReservationSelectorTerm{{ID: reservation.ID}}
+
+					podLabels := map[string]string{"test": "reservation-full-fallback"}
+					newPod := func(preferReserved bool) *corev1.Pod {
+						pod := test.Pod(test.PodOptions{
+							ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
+							NodeRequirements: []corev1.NodeSelectorRequirement{
+								{
+									Key:      corev1.LabelInstanceTypeStable,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{reservation.InstanceType},
+								},
+								{
+									Key:      corev1.LabelTopologyZone,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{reservation.Zone},
+								},
+							},
+							// Each pod needs its own node so the reservation is filled by the first pod
+							PodAntiRequirements: []corev1.PodAffinityTerm{{
+								TopologyKey:   corev1.LabelHostname,
+								LabelSelector: &metav1.LabelSelector{MatchLabels: podLabels},
+							}},
+						})
+						if preferReserved {
+							pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{{
+								Weight: 100,
+								Preference: corev1.NodeSelectorTerm{MatchExpressions: []corev1.NodeSelectorRequirement{{
+									Key:      karpv1.CapacityTypeLabelKey,
+									Operator: corev1.NodeSelectorOpIn,
+									Values:   []string{karpv1.CapacityTypeReserved},
+								}}},
+							}}
+						}
+						return pod
+					}
+
+					// Phase 1: fill the reservation
+					reservedPod := newPod(true)
+					Env.ExpectCreated(NodePool, NodeClass, reservedPod)
+					reservedNodeClaim := Env.EventuallyExpectLaunchedNodeClaimCount("==", 1)[0]
+					Env.EventuallyExpectNodeClaimsReady(reservedNodeClaim)
+					Env.EventuallyExpectHealthy(reservedPod)
+					reservedNode := Env.EventuallyExpectNodeCount("==", 1)[0]
+					Expect(reservedNode.Labels).To(HaveKeyWithValue(karpv1.CapacityTypeLabelKey, karpv1.CapacityTypeReserved))
+					Expect(reservedNode.Labels).To(HaveKeyWithValue(v1.LabelCapacityReservationID, reservation.ID))
+
+					// Karpenter already marks the reservation as consumed in its in-memory availability cache when it launches
+					// into it, but that cache is periodically resynced from DescribeCapacityReservations, which lags RunInstances.
+					// Waiting for EC2 itself to report the reservation as full guarantees that every view Karpenter can have of the
+					// reservation (launch bookkeeping or a resync) agrees that it has no remaining capacity. Otherwise the next
+					// launch could target the reservation, be rejected by EC2, and exercise the ICE fallback path instead.
+					environmentaws.EventuallyExpectCapacityReservationAvailableInstanceCount(Env.Context, Env.EC2API, reservation.ID, 0)
+
+					// Phase 2: the reservation is full, so the next pod must fall back to on-demand
+					fallbackPod := newPod(preferReserved)
+					Env.ExpectCreated(fallbackPod)
+					// On a fixed version the on-demand NodeClaim launches within about a minute. Bound the wait so a regression
+					// fails fast rather than waiting out the suite's default timeout.
+					var fallbackNodeClaim *karpv1.NodeClaim
+					Eventually(func(g Gomega) {
+						nodeClaims := &karpv1.NodeClaimList{}
+						g.Expect(Env.Client.List(Env.Context, nodeClaims, client.HasLabels{test.DiscoveryLabel})).To(Succeed())
+						launched := lo.Filter(nodeClaims.Items, func(nc karpv1.NodeClaim, _ int) bool {
+							return nc.Name != reservedNodeClaim.Name && nc.StatusConditions().IsTrue(karpv1.ConditionTypeLaunched)
+						})
+						g.Expect(launched).To(HaveLen(1))
+						fallbackNodeClaim = &launched[0]
+					}).WithTimeout(5*time.Minute).Should(Succeed(), "expected an on-demand nodeclaim for the pod once the reservation was full")
+					Expect(fallbackNodeClaim.Labels).To(HaveKeyWithValue(karpv1.CapacityTypeLabelKey, karpv1.CapacityTypeOnDemand))
+					Expect(fallbackNodeClaim.Labels).ToNot(HaveKey(v1.LabelCapacityReservationID))
+					_, hasReservationRequirement := lo.Find(fallbackNodeClaim.Spec.Requirements, func(req karpv1.NodeSelectorRequirementWithMinValues) bool {
+						return req.Key == v1.LabelCapacityReservationID
+					})
+					Expect(hasReservationRequirement).To(BeFalse())
+
+					Env.EventuallyExpectNodeClaimsReady(fallbackNodeClaim)
+					Env.EventuallyExpectHealthy(fallbackPod)
+					Env.EventuallyExpectNodeCount("==", 2)
+				},
+				Entry("when the pod prefers reserved capacity", true),
+				Entry("when the pod has no capacity type preference", false),
+			)
 		})
 
 		Context("Interruptible Capacity Resverations", func() {

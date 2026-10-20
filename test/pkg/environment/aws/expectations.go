@@ -784,6 +784,22 @@ func (env *Environment) tryCreateCapacityReservation(instanceType, zone string, 
 	return &CapacityReservation{ID: *out.CapacityReservation.CapacityReservationId, InstanceType: instanceType, Zone: zone}, nil
 }
 
+// EventuallyExpectCapacityReservationAvailableInstanceCount waits until EC2 reports the given number of available
+// instances for a capacity reservation. DescribeCapacityReservations is eventually consistent with RunInstances, so a
+// reservation can still report free capacity shortly after it has been filled.
+func EventuallyExpectCapacityReservationAvailableInstanceCount(ctx context.Context, ec2api *ec2.Client, reservationID string, count int32) {
+	GinkgoHelper()
+	By(fmt.Sprintf("waiting for capacity reservation %s to have %d available instances", reservationID, count))
+	Eventually(func(g Gomega) {
+		out, err := ec2api.DescribeCapacityReservations(ctx, &ec2.DescribeCapacityReservationsInput{
+			CapacityReservationIds: []string{reservationID},
+		})
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(out.CapacityReservations).To(HaveLen(1))
+		g.Expect(lo.FromPtr(out.CapacityReservations[0].AvailableInstanceCount)).To(Equal(count))
+	}).WithTimeout(5 * time.Minute).WithPolling(5 * time.Second).Should(Succeed())
+}
+
 func ExpectCapacityReservationsCanceled(ctx context.Context, ec2api *ec2.Client, reservationIDs ...string) {
 	GinkgoHelper()
 	for _, id := range lo.Compact(reservationIDs) {
