@@ -2728,6 +2728,62 @@ var _ = Describe("InstanceTypeProvider", func() {
 		})
 	})
 	Context("Provider Cache", func() {
+		It("should return fresh instance type copies per call that share the computed allocatable", func() {
+			list1, err := awsEnv.InstanceTypesProvider.List(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			list2, err := awsEnv.InstanceTypesProvider.List(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(list1).To(HaveLen(len(list2)))
+			byName := lo.SliceToMap(list2, func(it *corecloudprovider.InstanceType) (string, *corecloudprovider.InstanceType) { return it.Name, it })
+			for _, it1 := range list1 {
+				it2, ok := byName[it1.Name]
+				Expect(ok).To(BeTrue())
+				Expect(it1).ToNot(BeIdenticalTo(it2))
+				Expect(it1.Allocatable()).To(Equal(it2.Allocatable()))
+				// The allocatable is computed once and shared between copies rather than recomputed per call
+				Expect(reflect.ValueOf(it1.Allocatable()).UnsafePointer()).To(Equal(reflect.ValueOf(it2.Allocatable()).UnsafePointer()))
+			}
+			// Changing a copy's offerings doesn't affect other copies
+			for _, it := range list1 {
+				it.Offerings = nil
+			}
+			for _, it := range list2 {
+				Expect(it.Offerings).ToNot(BeEmpty())
+			}
+			list3, err := awsEnv.InstanceTypesProvider.List(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			for _, it := range list3 {
+				Expect(it.Offerings).ToNot(BeEmpty())
+			}
+		})
+		It("should add placement group requirements to copies without changing their allocatable", func() {
+			awsEnv.EC2API.DescribePlacementGroupsOutput.Set(&ec2.DescribePlacementGroupsOutput{
+				PlacementGroups: []ec2types.PlacementGroup{{
+					GroupId:        lo.ToPtr("pg-0123456789abcdef0"),
+					GroupName:      lo.ToPtr("test-partition-pg"),
+					Strategy:       ec2types.PlacementStrategyPartition,
+					PartitionCount: lo.ToPtr[int32](3),
+					State:          ec2types.PlacementGroupStateAvailable,
+				}},
+			})
+			pgNodeClass := nodeClass.DeepCopy()
+			pgNodeClass.Spec.PlacementGroupSelector = &v1.PlacementGroupSelector{Name: lo.ToPtr("test-partition-pg")}
+
+			list, err := awsEnv.InstanceTypesProvider.List(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			pgList, err := awsEnv.InstanceTypesProvider.List(ctx, pgNodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(pgList).ToNot(BeEmpty())
+			byName := lo.SliceToMap(list, func(it *corecloudprovider.InstanceType) (string, *corecloudprovider.InstanceType) { return it.Name, it })
+			for _, it := range pgList {
+				Expect(it.Requirements.Get(v1.LabelPlacementGroupID).Values()).To(ConsistOf("pg-0123456789abcdef0"))
+				Expect(it.Requirements.Get(v1.LabelPlacementGroupPartition).Values()).To(ConsistOf("1", "2", "3"))
+				if base, ok := byName[it.Name]; ok {
+					Expect(base.Requirements.Has(v1.LabelPlacementGroupID)).To(BeFalse())
+					Expect(it.Allocatable()).To(Equal(base.Allocatable()))
+				}
+			}
+		})
 		It("should return the same set of instance types from the cache when no changes are made", func() {
 			ExpectApplied(ctx, env.Client, nodeClass)
 			list1, err := cloudProvider.GetInstanceTypes(ctx, nodePool)
