@@ -22,6 +22,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 
 	arczonalshiftcontroller "github.com/aws/karpenter-provider-aws/pkg/controllers/arczonalshift"
@@ -84,6 +85,8 @@ func NewControllers(
 	validationCache *cache.Cache,
 	recreationCache *cache.Cache,
 	cloudProvider cloudprovider.CloudProvider,
+	overlayUndecoratedCloudProvider cloudprovider.CloudProvider,
+	instanceTypeStore *nodeoverlay.InstanceTypeStore,
 	subnetProvider subnet.Provider,
 	securityGroupProvider securitygroup.Provider,
 	instanceProfileProvider instanceprofile.Provider,
@@ -114,7 +117,7 @@ func NewControllers(
 		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
 		crcapacitytype.NewController(kubeClient, cloudProvider),
 		crexpiration.NewController(clk, kubeClient, cloudProvider, capacityReservationProvider),
-		metrics.NewController(kubeClient, cloudProvider),
+		metrics.NewController(kubeClient, overlayUndecoratedCloudProvider, instanceTypeStore),
 		arczonalshiftcontroller.NewController(kubeClient, recorder, zonalshiftProvider),
 		interruption.NewInstanceStatusController(kubeClient, clk, cloudProvider, recorder, instanceStatusProvider),
 	}

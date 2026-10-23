@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 )
 
@@ -43,13 +44,27 @@ type metricDimensions struct {
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
+	// instanceTypeStore holds the NodeOverlay adjustments for each NodePool. It is applied per NodePool on top of
+	// the instance types that cloudProvider resolves per NodeClass.
+	instanceTypeStore *nodeoverlay.InstanceTypeStore
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+// NewController constructs the offering metrics controller. cloudProvider must not apply NodeOverlays itself: the
+// controller resolves instance types once per NodeClass, which is the only input the AWS CloudProvider's
+// GetInstanceTypes depends on, and then applies the per-NodePool overlays from instanceTypeStore, mirroring the
+// overlay decorator. This keeps the emitted metrics identical to resolving every NodePool through the decorated
+// CloudProvider, without repeating the instance type resolution for each NodePool that shares a NodeClass.
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, instanceTypeStore *nodeoverlay.InstanceTypeStore) *Controller {
 	return &Controller{
-		kubeClient:    kubeClient,
-		cloudProvider: cloudProvider,
+		kubeClient:        kubeClient,
+		cloudProvider:     cloudProvider,
+		instanceTypeStore: instanceTypeStore,
 	}
+}
+
+type instanceTypesResult struct {
+	instanceTypes []*cloudprovider.InstanceType
+	err           error
 }
 
 //nolint:gocyclo
@@ -60,9 +75,24 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 	availability := map[metricDimensions]bool{}
 	price := map[metricDimensions]float64{}
+	// Instance types are resolved once per NodeClass and shared by every NodePool that references it. NodePools are
+	// still visited in list order, so the per-NodePool overlay application and the last-write-wins price
+	// aggregation below are unchanged.
+	resolved := map[karpv1.NodeClassReference]instanceTypesResult{}
 	var errs error
 	for _, nodePool := range nodePools.Items {
-		instanceTypes, err := c.cloudProvider.GetInstanceTypes(ctx, &nodePool)
+		key := lo.FromPtr(nodePool.Spec.Template.Spec.NodeClassRef)
+		result, ok := resolved[key]
+		if !ok {
+			result.instanceTypes, result.err = c.cloudProvider.GetInstanceTypes(ctx, &nodePool)
+			resolved[key] = result
+		}
+		instanceTypes, err := result.instanceTypes, result.err
+		if err == nil && coreoptions.FromContext(ctx).FeatureGates.NodeOverlay && c.instanceTypeStore != nil {
+			if instanceTypes, err = c.instanceTypeStore.ApplyAll(nodePool.Name, instanceTypes); err != nil {
+				err = fmt.Errorf("applying nodeoverlays, %w", err)
+			}
+		}
 		if err != nil {
 			// Keep going rather than abandoning the reconcile. A NodePool whose instance types can't be
 			// resolved -- an undecodable spec.kubelet, for instance -- would otherwise suppress the

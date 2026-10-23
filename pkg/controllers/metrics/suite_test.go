@@ -16,11 +16,20 @@ package metrics_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/awslabs/operatorpkg/object"
+	"github.com/awslabs/operatorpkg/singleton"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	karpv1alpha1 "sigs.k8s.io/karpenter/pkg/apis/v1alpha1"
+	corecloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -70,7 +79,7 @@ var _ = BeforeSuite(func() {
 	awsEnv = test.NewEnvironment(ctx, env)
 	cloudProvider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, events.NewRecorder(&record.FakeRecorder{}),
 		env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore, lo.ToPtr(""))
-	controller = metrics.NewController(env.Client, cloudProvider)
+	controller = metrics.NewController(env.Client, cloudProvider, awsEnv.InstanceTypeStore)
 
 	pricingController = pricing.NewController(awsEnv.PricingProvider)
 })
@@ -628,6 +637,127 @@ var _ = Describe("MetricsController", func() {
 					Expect(of.CapacityType()).ToNot(Equal(karpv1.CapacityTypeReserved))
 				}
 			}
+		})
+	})
+	Context("NodeClass deduplication", func() {
+		var nodeClass2 *v1.EC2NodeClass
+		BeforeEach(func() {
+			nodeClass2 = test.EC2NodeClass(v1.EC2NodeClass{
+				Status: v1.EC2NodeClassStatus{
+					Subnets: []v1.Subnet{{ID: "subnet-test1", Zone: "test-zone-1a"}},
+					CapacityReservations: []v1.CapacityReservation{{
+						AvailabilityZone:      "test-zone-1a",
+						ID:                    "cr-dedupe",
+						InstanceMatchCriteria: string(ec2types.InstanceMatchCriteriaTargeted),
+						InstanceType:          "m5.large",
+						OwnerID:               "012345678901",
+						State:                 v1.CapacityReservationStateActive,
+						ReservationType:       v1.CapacityReservationTypeDefault,
+					}},
+				},
+			})
+			nodeClass2.StatusConditions().SetTrue(status.ConditionReady)
+			awsEnv.CapacityReservationProvider.SetAvailableInstanceCount("cr-dedupe", 1)
+			_, err := awsEnv.SubnetProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+			metrics.InstanceTypeOfferingAvailable.Reset()
+			metrics.InstanceTypeOfferingPriceEstimate.Reset()
+		})
+		nodePoolFor := func(name string, nc *v1.EC2NodeClass) *karpv1.NodePool {
+			np := coretest.NodePool(karpv1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: name}})
+			np.Spec.Template.Spec.NodeClassRef = &karpv1.NodeClassReference{
+				Group: object.GVK(nc).Group,
+				Kind:  object.GVK(nc).Kind,
+				Name:  nc.Name,
+			}
+			return np
+		}
+		// expectGaugesMatchReference compares every emitted series with what resolving each NodePool through
+		// referenceCloudProvider would have emitted. Errors are asserted by the callers that expect them.
+		expectGaugesMatchReference := func(referenceCloudProvider corecloudprovider.CloudProvider) {
+			GinkgoHelper()
+			expectedAvailability, expectedPrice, _ := perNodePoolReference(ctx, env.Client, referenceCloudProvider)
+			Expect(expectedPrice).ToNot(BeEmpty())
+			Expect(gatherSeries(availableMetricName)).To(Equal(expectedAvailability))
+			Expect(gatherSeries(priceMetricName)).To(Equal(expectedPrice))
+		}
+
+		It("should resolve instance types once per NodeClass and emit the same gauges as resolving every NodePool", func() {
+			ExpectApplied(ctx, env.Client, nodeClass, nodeClass2)
+			for i := range 20 {
+				ExpectApplied(ctx, env.Client, nodePoolFor(fmt.Sprintf("shared-%02d", i), lo.Ternary(i%4 == 3, nodeClass2, nodeClass)))
+			}
+			counting := &countingCloudProvider{CloudProvider: cloudProvider}
+			c := metrics.NewController(env.Client, counting, awsEnv.InstanceTypeStore)
+			ExpectSingletonReconciled(ctx, c)
+			Expect(counting.calls.Load()).To(BeNumerically("==", 2))
+
+			reference := &countingCloudProvider{CloudProvider: cloudProvider}
+			expectGaugesMatchReference(reference)
+			Expect(reference.calls.Load()).To(BeNumerically("==", 20))
+		})
+		DescribeTable("should apply NodeOverlays per NodePool on top of the shared instance types",
+			func(nodePoolNames []string, overlaidNodePool string, expectedM5LargePrice func(base float64) float64) {
+				ctx = coreoptions.ToContext(ctx, coretest.Options(coretest.OptionsFields{FeatureGates: coretest.FeatureGates{
+					ReservedCapacity: lo.ToPtr(true),
+					NodeOverlay:      lo.ToPtr(true),
+				}}))
+				ExpectApplied(ctx, env.Client, nodeClass)
+				for _, name := range nodePoolNames {
+					np := nodePoolFor(name, nodeClass)
+					if name == overlaidNodePool {
+						np.Spec.Template.Labels = lo.Assign(np.Spec.Template.Labels, map[string]string{"metrics-overlay": "true"})
+					}
+					ExpectApplied(ctx, env.Client, np)
+				}
+				ExpectApplied(ctx, env.Client, coretest.NodeOverlay(karpv1alpha1.NodeOverlay{
+					Spec: karpv1alpha1.NodeOverlaySpec{
+						Requirements: []karpv1alpha1.NodeSelectorRequirement{
+							{Key: "metrics-overlay", Operator: corev1.NodeSelectorOpIn, Values: []string{"true"}},
+							{Key: corev1.LabelInstanceTypeStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
+						},
+						Price: lo.ToPtr("123.456"),
+					},
+				}))
+				overlaidCloudProvider := overlay.Decorate(cloudProvider, env.Client, awsEnv.InstanceTypeStore)
+				nodeOverlayController := nodeoverlay.NewController(awsEnv.Clock, env.Client, cloudProvider, awsEnv.InstanceTypeStore, state.NewCluster(awsEnv.Clock, env.Client, overlaidCloudProvider))
+				ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+
+				counting := &countingCloudProvider{CloudProvider: cloudProvider}
+				ExpectSingletonReconciled(ctx, metrics.NewController(env.Client, counting, awsEnv.InstanceTypeStore))
+				Expect(counting.calls.Load()).To(BeNumerically("==", 1))
+				expectGaugesMatchReference(overlaidCloudProvider)
+
+				// The price gauge is last-write-wins across NodePools in list order, exactly as before.
+				base, ok := awsEnv.PricingProvider.OnDemandPrice("m5.large")
+				Expect(ok).To(BeTrue())
+				Expect(gatherSeries(priceMetricName)).To(HaveKeyWithValue(
+					series{instanceType: "m5.large", capacityType: karpv1.CapacityTypeOnDemand, zone: "test-zone-1a"}, expectedM5LargePrice(base)))
+			},
+			Entry("overlaid NodePool listed last", []string{"a-plain", "b-plain", "c-overlaid"}, "c-overlaid", func(float64) float64 { return 123.456 }),
+			Entry("overlaid NodePool listed first", []string{"a-overlaid", "b-plain", "c-plain"}, "a-overlaid", func(base float64) float64 { return base }),
+		)
+		It("should still report NodePools whose overlays could not be applied as errors without dropping other series", func() {
+			ctx = coreoptions.ToContext(ctx, coretest.Options(coretest.OptionsFields{FeatureGates: coretest.FeatureGates{
+				ReservedCapacity: lo.ToPtr(true),
+				NodeOverlay:      lo.ToPtr(true),
+			}}))
+			ExpectApplied(ctx, env.Client, nodeClass, nodePoolFor("evaluated", nodeClass))
+			overlaidCloudProvider := overlay.Decorate(cloudProvider, env.Client, awsEnv.InstanceTypeStore)
+			nodeOverlayController := nodeoverlay.NewController(awsEnv.Clock, env.Client, cloudProvider, awsEnv.InstanceTypeStore, state.NewCluster(awsEnv.Clock, env.Client, overlaidCloudProvider))
+			ExpectReconciled(ctx, nodeOverlayController, reconcile.Request{})
+			// Created after the overlay store was built, so the store has not evaluated it yet.
+			ExpectApplied(ctx, env.Client, nodePoolFor("unevaluated", nodeClass))
+
+			counting := &countingCloudProvider{CloudProvider: cloudProvider}
+			_, err := singleton.AsReconciler(metrics.NewController(env.Client, counting, awsEnv.InstanceTypeStore)).Reconcile(ctx, reconcile.Request{})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("unevaluated"))
+			Expect(counting.calls.Load()).To(BeNumerically("==", 1))
+
+			_, _, referenceErr := perNodePoolReference(ctx, env.Client, overlaidCloudProvider)
+			Expect(referenceErr).To(HaveOccurred())
+			expectGaugesMatchReference(overlaidCloudProvider)
 		})
 	})
 })
