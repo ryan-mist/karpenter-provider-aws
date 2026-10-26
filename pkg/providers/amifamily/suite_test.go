@@ -680,8 +680,12 @@ var _ = Describe("AMIProvider", func() {
 			_, err := awsEnv.AMIProvider.List(ctx, nodeClass)
 			Expect(err).To(BeNil())
 
-			Expect(awsEnv.AMICache.Items()).To(HaveLen(1))
-			cachedImages := lo.Values(awsEnv.AMICache.Items())[0].Object.(amifamily.AMIs)
+			// Each name selector term is a distinct query, cached independently
+			Expect(awsEnv.AMICache.Items()).To(HaveLen(2))
+			cachedImages := amifamily.AMIs{}
+			for _, item := range awsEnv.AMICache.Items() {
+				cachedImages = append(cachedImages, item.Object.(amifamily.AMIs)...)
+			}
 			Expect(cachedImages).To(ContainElements(
 				gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 					"Name": Equal("ami-name-1"),
@@ -798,7 +802,8 @@ var _ = Describe("AMIProvider", func() {
 			))
 
 			cacheItems := awsEnv.AMICache.Items()
-			Expect(cacheItems).To(HaveLen(2))
+			// Caching is per query: one entry for the AND set, one for each OR set
+			Expect(cacheItems).To(HaveLen(3))
 			cachedImages := make([]amifamily.AMIs, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedImages = append(cachedImages, item.Object.(amifamily.AMIs))
@@ -814,11 +819,100 @@ var _ = Describe("AMIProvider", func() {
 					gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 						"Name": Equal("ami-name-1"),
 					}),
+				),
+				ConsistOf(
 					gstruct.MatchFields(gstruct.IgnoreExtras, gstruct.Fields{
 						"Name": Equal("ami-name-2"),
 					}),
 				),
 			))
+		})
+		It("should share a cache entry across NodeClasses with an identical selector term", func() {
+			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
+				{
+					Name:         aws.String("ami-name-shared"),
+					ImageId:      aws.String("ami-shared"),
+					Architecture: "x86_64",
+					Tags:         []ec2types.Tag{{Key: aws.String("foo"), Value: aws.String("bar")}},
+					CreationDate: aws.String("2022-08-15T12:00:00Z"),
+					State:        ec2types.ImageStateAvailable,
+				},
+			}})
+			nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.AMIProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err = awsEnv.AMIProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			Expect(awsEnv.AMICache.Items()).To(HaveLen(1))
+			Expect(awsEnv.EC2API.CalledWithDescribeImagesInput.Len()).To(Equal(1))
+		})
+		It("should not share a cache entry across NodeClasses whose name selectors resolve different owners", func() {
+			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
+				{
+					Name:         aws.String("shared-name"),
+					ImageId:      aws.String("ami-owner"),
+					Architecture: "x86_64",
+					CreationDate: aws.String("2022-08-15T12:00:00Z"),
+					State:        ec2types.ImageStateAvailable,
+				},
+			}})
+			nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Name: "shared-name", Owner: "111111111111"}}
+			_, err := awsEnv.AMIProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Name: "shared-name", Owner: "222222222222"}}
+			_, err = awsEnv.AMIProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			// Sharing a cache entry here would surface an AMI from an account the second
+			// NodeClass never authorized
+			Expect(awsEnv.AMICache.Items()).To(HaveLen(2))
+			Expect(awsEnv.EC2API.CalledWithDescribeImagesInput.Len()).To(Equal(2))
+		})
+		It("should observe fresh results with SkipCache even when the cache is populated", func() {
+			awsEnv.Clock.SetTime(time.Now())
+			// Populate the cache with a non-deprecated AMI
+			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
+				{
+					Name:         aws.String("ami-name-x"),
+					ImageId:      aws.String("ami-xyz"),
+					Architecture: "x86_64",
+					CreationDate: aws.String("2022-08-15T12:00:00Z"),
+					State:        ec2types.ImageStateAvailable,
+				},
+			}})
+			nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{ID: "ami-xyz"}}
+			amis, err := awsEnv.AMIProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+			Expect(amis).To(HaveLen(1))
+			Expect(amis[0].Deprecated).To(BeFalse())
+			Expect(awsEnv.AMICache.Items()).To(HaveLen(1))
+
+			// The AMI is now deprecated at the API, but a cached List still returns the stale result
+			awsEnv.EC2API.DescribeImagesOutput.Set(&ec2.DescribeImagesOutput{Images: []ec2types.Image{
+				{
+					Name:            aws.String("ami-name-x"),
+					ImageId:         aws.String("ami-xyz"),
+					Architecture:    "x86_64",
+					CreationDate:    aws.String("2022-08-15T12:00:00Z"),
+					DeprecationTime: aws.String(awsEnv.Clock.Now().Add(-time.Hour).Format(time.RFC3339)),
+					State:           ec2types.ImageStateAvailable,
+				},
+			}})
+			cached, err := awsEnv.AMIProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+			Expect(cached).To(HaveLen(1))
+			Expect(cached[0].Deprecated).To(BeFalse())
+
+			fresh, err := awsEnv.AMIProvider.List(ctx, nodeClass, amifamily.SkipCache)
+			Expect(err).To(BeNil())
+			Expect(fresh).To(HaveLen(1))
+			Expect(fresh[0].Deprecated).To(BeTrue())
 		})
 	})
 	Context("AMI Selectors", func() {
