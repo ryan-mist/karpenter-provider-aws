@@ -162,9 +162,9 @@ func (p *DefaultProvider) InjectOfferings(
 		for _, resolver := range p.resolvers {
 			offerings = resolver.ResolveOfferings(ctx, it, offerings, info, nodeClass, allZones, shiftedZones, pg, rc)
 		}
-		// NOTE: By making this copy one level deep, we can modify the offerings without mutating the results from previous
-		// GetInstanceTypes calls. This should still be done with caution - it is currently done here in the provider, and
-		// once in the instance provider (filterReservedInstanceTypes)
+		// NOTE: By making this copy one level deep (WithOfferings below), we can modify the offerings without mutating the
+		// results from previous GetInstanceTypes calls. This should still be done with caution - it is currently done here
+		// in the provider, and once in the instance provider (filterReservedInstanceTypes)
 
 		// Inject placement group requirements into instance type requirements so the scheduler
 		// can discover partition topology domains for TopologySpreadConstraints.
@@ -180,14 +180,11 @@ func (p *DefaultProvider) InjectOfferings(
 				reqs.Add(scheduling.NewRequirement(v1.LabelPlacementGroupPartition, corev1.NodeSelectorOpIn, partitions...))
 			}
 		}
-		its = append(its, &cloudprovider.InstanceType{
-			Name:                   it.Name,
-			Requirements:           reqs,
-			Offerings:              offerings,
-			Capacity:               it.Capacity,
-			Overhead:               it.Overhead,
-			VolumeAttachmentLimits: it.VolumeAttachmentLimits,
-		})
+		// WithOfferings shares the cached instance type's Capacity, Overhead and computed base allocatable, so the
+		// allocatable isn't recomputed for every copy returned from GetInstanceTypes
+		injected := it.WithOfferings(offerings)
+		injected.Requirements = reqs
+		its = append(its, injected)
 	}
 	return its
 }
