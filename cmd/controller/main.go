@@ -86,6 +86,8 @@ func main() {
 			op.ValidationCache,
 			op.RecreationCache,
 			cloudProvider,
+			overlayUndecoratedCloudProvider,
+			op.InstanceTypeStore,
 			op.SubnetProvider,
 			op.SecurityGroupProvider,
 			op.InstanceProfileProvider,
