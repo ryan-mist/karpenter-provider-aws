@@ -155,3 +155,6 @@ require (
 )
 
 replace github.com/google/cel-go v0.31.0 => cel.dev/cel-go v0.31.0
+
+// DEV-ONLY(cit-alt): core from ryan-mist/karpenter cit/alt-offering-incompatible; remove before merging and bump the core version instead.
+replace sigs.k8s.io/karpenter => github.com/ryan-mist/karpenter v0.0.0-20261105213722-5f5704feac6b
