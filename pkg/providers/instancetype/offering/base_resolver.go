@@ -181,6 +181,9 @@ func newCacheKeyBuilder(nodeClass NodeClass, zoneInfo []v1.ZoneInfo, shiftedZone
 		&hashstructure.HashOptions{SlicesAsSets: true},
 	)
 	connectionTrackingHash, _ := hashstructure.Hash(nodeClass.ConnectionTracking() != nil, hashstructure.FormatV2, nil)
+	// Every input to compatibility.IsCompatibleWithNodeClass must be part of the key, or cached offerings keep a stale
+	// Available/Incompatible after the NodeClass changes.
+	amiFamilyHash, _ := hashstructure.Hash(nodeClass.AMIFamily(), hashstructure.FormatV2, nil)
 	enclaveOptions := nodeClass.EnclaveOptions()
 	enclavesEnabled := enclaveOptions != nil && enclaveOptions.Enabled
 	enclavesEnabledHash, _ := hashstructure.Hash(enclavesEnabled, hashstructure.FormatV2, nil)
@@ -194,11 +197,12 @@ func newCacheKeyBuilder(nodeClass NodeClass, zoneInfo []v1.ZoneInfo, shiftedZone
 
 	b := &cacheKeyBuilder{
 		baseSuffix: fmt.Sprintf(
-			"%016x-%016x-%016x-%016x-%016x-%016x-%016x",
+			"%016x-%016x-%016x-%016x-%016x-%016x-%016x-%016x",
 			networkInterfaceHash,
 			subnetsHash,
 			shiftedZonesHash,
 			connectionTrackingHash,
+			amiFamilyHash,
 			enclavesEnabledHash,
 			nestedVirtualizationEnabledHash,
 			placementGroupHash,

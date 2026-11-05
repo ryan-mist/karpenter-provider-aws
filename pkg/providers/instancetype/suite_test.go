@@ -3348,6 +3348,21 @@ var _ = Describe("InstanceTypeProvider", func() {
 				Entry("when AMI is AL2023", v1.AMIFamilyAL2023, "al2023@latest", false),
 				Entry("when AMI is BottleRocket", v1.AMIFamilyBottlerocket, "bottlerocket@latest", true),
 			)
+			// The AMI family is an input to NodeClass compatibility, so it must be part of the offering cache key: otherwise
+			// cached offerings keep a stale Available/Incompatible after the NodeClass's AMI family changes.
+			It("should flip Incompatible when the NodeClass's AMI family changes, without a cache flush", func() {
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyAL2023)
+				ExpectOfferingsState(listOfferings(ctx, nodeClass, "a1.medium"), false, true)
+
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "bottlerocket@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyBottlerocket)
+				ExpectOfferingsState(listOfferings(ctx, nodeClass, "a1.medium"), true, false)
+
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyAL2023)
+				ExpectOfferingsState(listOfferings(ctx, nodeClass, "a1.medium"), false, true)
+			})
 		})
 		Context("Network Interfaces", func() {
 			It("should mark instance type offering as available when it supports network interface configuration", func() {
