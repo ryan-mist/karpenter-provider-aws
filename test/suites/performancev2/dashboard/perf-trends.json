@@ -1,0 +1,867 @@
+{
+  "title": "Karpenter perf v2 trends",
+  "uid": "karpenter-perfv2-trends",
+  "description": "Nightly perf v2 gate results from Timestream karpenterTesting.perfResults (one multi-measure record per phase x metric).",
+  "tags": [
+    "karpenter",
+    "perf"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "datasource",
+        "name": "ds",
+        "label": "Timestream",
+        "query": "grafana-timestream-datasource",
+        "refresh": 1,
+        "hide": 0,
+        "regex": "",
+        "current": {}
+      },
+      {
+        "type": "query",
+        "name": "provider",
+        "label": "provider",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "query": {
+          "refId": "var-provider",
+          "rawQuery": "SELECT DISTINCT provider FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter ORDER BY 1"
+        },
+        "definition": "SELECT DISTINCT provider FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "options": [],
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "scenario",
+        "label": "scenario",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "query": {
+          "refId": "var-scenario",
+          "rawQuery": "SELECT DISTINCT scenario FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' ORDER BY 1"
+        },
+        "definition": "SELECT DISTINCT scenario FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "options": [],
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "phase",
+        "label": "phase",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "query": {
+          "refId": "var-phase",
+          "rawQuery": "SELECT DISTINCT phase FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' AND scenario = '${scenario}' ORDER BY 1"
+        },
+        "definition": "SELECT DISTINCT phase FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' AND scenario = '${scenario}' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": false,
+        "includeAll": false,
+        "hide": 0,
+        "options": [],
+        "regex": ""
+      },
+      {
+        "type": "query",
+        "name": "trigger",
+        "label": "trigger",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "query": {
+          "refId": "var-trigger",
+          "rawQuery": "SELECT DISTINCT trigger FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' ORDER BY 1"
+        },
+        "definition": "SELECT DISTINCT trigger FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "hide": 0,
+        "options": [],
+        "regex": "",
+        "current": {
+          "selected": true,
+          "text": [
+            "schedule"
+          ],
+          "value": [
+            "schedule"
+          ]
+        }
+      },
+      {
+        "type": "query",
+        "name": "metric",
+        "label": "gated metric",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "query": {
+          "refId": "var-metric",
+          "rawQuery": "SELECT DISTINCT measure_name FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}' AND gated ORDER BY 1"
+        },
+        "definition": "SELECT DISTINCT measure_name FROM \"karpenterTesting\".\"perfResults\" WHERE $__timeFilter AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}' AND gated ORDER BY 1",
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "hide": 0,
+        "options": [],
+        "regex": "",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "name": "Commit changed",
+        "enable": true,
+        "hide": false,
+        "iconColor": "#9085e9",
+        "datasource": {
+          "type": "grafana-timestream-datasource",
+          "uid": "${ds}"
+        },
+        "target": {
+          "refId": "Anno",
+          "datasource": {
+            "type": "grafana-timestream-datasource",
+            "uid": "${ds}"
+          },
+          "rawQuery": "WITH runs AS (\n  SELECT run_id, min(time) AS time, max(aws_commit) AS aws_commit, max(core_commit) AS core_commit\n  FROM \"karpenterTesting\".\"perfResults\"\n  WHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\n  GROUP BY run_id\n), s AS (\n  SELECT time, aws_commit, core_commit, lag(aws_commit) OVER (ORDER BY time) AS prev FROM runs\n)\nSELECT time, concat('aws ', prev, ' -> ', aws_commit, ' (core ', coalesce(core_commit, '?'), ')') AS text\nFROM s\nWHERE prev IS NOT NULL AND prev <> aws_commit\nORDER BY time"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Gates (selected phase)",
+      "collapsed": false,
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 2,
+      "title": "${metric}",
+      "description": "Value (solid blue) vs the bound in force (dashed gray step) for one gated metric of the selected\nprovider/scenario/phase. Red point = a FAIL status; yellow point = WARN (passed with < 10% headroom). Violet\nvertical lines = the AWS commit under test changed (annotation, toggle at the top). Record time = phase END (phase start = time - the total_time_seconds value).\n\nQuery notes:\n- bin(time, $__interval_ms) (panel min interval 1h) folds several records in one bin (re-run attempts, or\n  more than one sizes vector) into one point: the value and bound of the record with the LEAST headroom_pct\n  (min_by), and the worst status in the bin. The sink has no repeat dimension, so the fold stays here.\n- `gated` keeps only gated records (ungated metrics carry only value/gated/upper).\n\nWITH b AS (\n  SELECT bin(time, ${__interval_ms}ms) AS t,\n    min_by(value, headroom_pct) AS value,\n    min_by(bound, headroom_pct) AS bound,\n    max(CASE status WHEN 'FAIL' THEN 2 WHEN 'WARN' THEN 1 ELSE 0 END) AS worst\n  FROM \"karpenterTesting\".\"perfResults\"\n  WHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\n    AND measure_name = '${metric}' AND gated\n  GROUP BY 1\n)\nSELECT t AS time, value, bound,\n  CASE WHEN worst = 2 THEN value END AS failed,\n  CASE WHEN worst = 1 THEN value END AS warned\nFROM b\nORDER BY time",
+      "datasource": {
+        "type": "grafana-timestream-datasource",
+        "uid": "${ds}"
+      },
+      "repeat": "metric",
+      "repeatDirection": "h",
+      "maxPerRow": 3,
+      "interval": "1h",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-timestream-datasource",
+            "uid": "${ds}"
+          },
+          "rawQuery": "WITH b AS (\n  SELECT bin(time, ${__interval_ms}ms) AS t,\n    min_by(value, headroom_pct) AS value,\n    min_by(bound, headroom_pct) AS bound,\n    max(CASE status WHEN 'FAIL' THEN 2 WHEN 'WARN' THEN 1 ELSE 0 END) AS worst\n  FROM \"karpenterTesting\".\"perfResults\"\n  WHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\n    AND measure_name = '${metric}' AND gated\n  GROUP BY 1\n)\nSELECT t AS time, value, bound,\n  CASE WHEN worst = 2 THEN value END AS failed,\n  CASE WHEN worst = 1 THEN value END AS warned\nFROM b\nORDER BY time"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "showPoints": "always",
+            "pointSize": 6,
+            "spanNulls": true,
+            "axisSoftMin": 0,
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "axisGridShow": true
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#3987e5"
+          },
+          "decimals": 2
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#3987e5"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "value"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bound"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#8a8985"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "bound"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    8,
+                    6
+                  ]
+                }
+              },
+              {
+                "id": "custom.lineInterpolation",
+                "value": "stepAfter"
+              },
+              {
+                "id": "custom.showPoints",
+                "value": "never"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "failed"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 11
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#d03b3b"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "FAIL (passed=false)"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warned"
+            },
+            "properties": [
+              {
+                "id": "custom.drawStyle",
+                "value": "points"
+              },
+              {
+                "id": "custom.pointSize",
+                "value": 10
+              },
+              {
+                "id": "custom.lineWidth",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "#fab219"
+                }
+              },
+              {
+                "id": "displayName",
+                "value": "WARN (<10% headroom)"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Latest run",
+      "collapsed": false,
+      "id": 3,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 4,
+      "title": "Latest run: every gate, tightest first",
+      "description": "Every gate of the most recent record of each spec (scenario/phase/sizes) for the selected provider\nand trigger(s), sorted by the sink's headroom_pct (tightest first; negative = past the bound). status is the\nsink's: FAIL = passed=false, WARN = passed with headroom_pct < 10, PASS otherwise. A re-run attempt is later,\nso it wins. run_id links to run_url. Ignores the scenario/phase/metric pickers on purpose: this is the\none-glance \"did last night pass\" view. Record time = phase END (phase start = time - the total_time_seconds value).\n\nWITH g AS (\n  SELECT time, scenario, phase, sizes, measure_name AS metric, value, bound, headroom_pct, status, tier,\n    aws_commit, core_commit, run_id, run_url\n  FROM \"karpenterTesting\".\"perfResults\"\n  WHERE $__timeFilter AND provider = '${provider}' AND trigger IN (${trigger:sqlstring})\n    AND gated\n), l AS (\n  SELECT scenario, phase, sizes, max(time) AS last FROM g GROUP BY scenario, phase, sizes\n)\nSELECT g.status, concat(g.scenario, '/', g.phase) AS spec, g.metric, g.value, g.bound,\n  round(g.headroom_pct, 1) AS headroom_pct, g.tier, g.sizes, g.aws_commit, g.core_commit, g.run_id, g.time,\n  g.run_url\nFROM g JOIN l ON g.scenario = l.scenario AND g.phase = l.phase AND g.sizes = l.sizes AND g.time = l.last\nORDER BY headroom_pct ASC",
+      "datasource": {
+        "type": "grafana-timestream-datasource",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-timestream-datasource",
+            "uid": "${ds}"
+          },
+          "rawQuery": "WITH g AS (\n  SELECT time, scenario, phase, sizes, measure_name AS metric, value, bound, headroom_pct, status, tier,\n    aws_commit, core_commit, run_id, run_url\n  FROM \"karpenterTesting\".\"perfResults\"\n  WHERE $__timeFilter AND provider = '${provider}' AND trigger IN (${trigger:sqlstring})\n    AND gated\n), l AS (\n  SELECT scenario, phase, sizes, max(time) AS last FROM g GROUP BY scenario, phase, sizes\n)\nSELECT g.status, concat(g.scenario, '/', g.phase) AS spec, g.metric, g.value, g.bound,\n  round(g.headroom_pct, 1) AS headroom_pct, g.tier, g.sizes, g.aws_commit, g.core_commit, g.run_id, g.time,\n  g.run_url\nFROM g JOIN l ON g.scenario = l.scenario AND g.phase = l.phase AND g.sizes = l.sizes AND g.time = l.last\nORDER BY headroom_pct ASC"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "sortBy": [
+          {
+            "displayName": "headroom_pct",
+            "desc": false
+          }
+        ],
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          },
+          "decimals": 3
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "PASS": {
+                        "text": "● PASS",
+                        "color": "#0ca30c",
+                        "index": 0
+                      },
+                      "WARN": {
+                        "text": "▲ WARN",
+                        "color": "#fab219",
+                        "index": 1
+                      },
+                      "FAIL": {
+                        "text": "■ FAIL",
+                        "color": "#d03b3b",
+                        "index": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "headroom_pct"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#d03b3b",
+                      "value": null
+                    },
+                    {
+                      "color": "#fab219",
+                      "value": 0
+                    },
+                    {
+                      "color": "#0ca30c",
+                      "value": 10
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "run_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "GitHub run",
+                    "targetBlank": true,
+                    "url": "${__data.fields.run_url}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "run_url"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "time"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "By commit",
+      "collapsed": false,
+      "id": 5,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "panels": []
+    },
+    {
+      "type": "barchart",
+      "id": 6,
+      "title": "${metric} by commit",
+      "description": "Mean value per AWS provider commit (aws_commit), in the order commits first appeared. Bar color =\nworst status of that commit's records (blue pass, yellow warn, red fail); the tooltip has min/max, the bound,\nthe least headroom and the record count. A step up between two adjacent bars names the regressing commit\nrange. A core bump without an AWS commit change shows in the annotation text (core_commit).\n\nSELECT aws_commit,\n  avg(value) AS value,\n  min(value) AS min_value,\n  max(value) AS max_value,\n  max(bound) AS bound,\n  min(headroom_pct) AS min_headroom_pct,\n  count(*) AS points,\n  max(CASE status WHEN 'FAIL' THEN 2 WHEN 'WARN' THEN 1 ELSE 0 END) AS status\nFROM \"karpenterTesting\".\"perfResults\"\nWHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\n  AND measure_name = '${metric}'\nGROUP BY aws_commit\nORDER BY min(time)",
+      "datasource": {
+        "type": "grafana-timestream-datasource",
+        "uid": "${ds}"
+      },
+      "repeat": "metric",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-timestream-datasource",
+            "uid": "${ds}"
+          },
+          "rawQuery": "SELECT aws_commit,\n  avg(value) AS value,\n  min(value) AS min_value,\n  max(value) AS max_value,\n  max(bound) AS bound,\n  min(headroom_pct) AS min_headroom_pct,\n  count(*) AS points,\n  max(CASE status WHEN 'FAIL' THEN 2 WHEN 'WARN' THEN 1 ELSE 0 END) AS status\nFROM \"karpenterTesting\".\"perfResults\"\nWHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\n  AND measure_name = '${metric}'\nGROUP BY aws_commit\nORDER BY min(time)"
+        }
+      ],
+      "options": {
+        "xField": "aws_commit",
+        "colorByField": "status",
+        "orientation": "vertical",
+        "xTickLabelRotation": -45,
+        "xTickLabelMaxLength": 8,
+        "showValue": "never",
+        "barWidth": 0.8,
+        "groupWidth": 0.7,
+        "stacking": "none",
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#3987e5"
+          },
+          "decimals": 2,
+          "custom": {
+            "fillOpacity": 90,
+            "lineWidth": 0,
+            "axisSoftMin": 0
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "status"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "thresholds"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "#3987e5",
+                      "value": null
+                    },
+                    {
+                      "color": "#fab219",
+                      "value": 1
+                    },
+                    {
+                      "color": "#d03b3b",
+                      "value": 2
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "pass"
+                      },
+                      "1": {
+                        "text": "warn"
+                      },
+                      "2": {
+                        "text": "fail"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "min_value"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max_value"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "bound"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "min_headroom_pct"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "points"
+            },
+            "properties": [
+              {
+                "id": "custom.hideFrom",
+                "value": {
+                  "viz": true,
+                  "legend": true,
+                  "tooltip": false
+                }
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "title": "Context",
+      "collapsed": false,
+      "id": 7,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 30
+      },
+      "panels": []
+    },
+    {
+      "type": "state-timeline",
+      "id": 8,
+      "title": "Run environment",
+      "description": "Environment of each run of the selected lane, so a jump in the Gates row can be matched against\na k8s version, control-plane tier, controller resource or core module change. A new color band = a change.\nEmpty cp_tier = kind (no EKS control plane). Record time = phase END (phase start = time - the total_time_seconds value).\n\nSELECT bin(time, ${__interval_ms}ms) AS time,\n  max(k8s_version) AS k8s_version,\n  max(cp_tier) AS cp_tier,\n  max(controller_shape) AS controller_shape,\n  max(core_commit) AS core_commit\nFROM \"karpenterTesting\".\"perfResults\"\nWHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\nGROUP BY 1\nORDER BY 1",
+      "datasource": {
+        "type": "grafana-timestream-datasource",
+        "uid": "${ds}"
+      },
+      "interval": "1h",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-timestream-datasource",
+            "uid": "${ds}"
+          },
+          "rawQuery": "SELECT bin(time, ${__interval_ms}ms) AS time,\n  max(k8s_version) AS k8s_version,\n  max(cp_tier) AS cp_tier,\n  max(controller_shape) AS controller_shape,\n  max(core_commit) AS core_commit\nFROM \"karpenterTesting\".\"perfResults\"\nWHERE $__timeFilter\n  AND provider = '${provider}' AND scenario = '${scenario}' AND phase = '${phase}'\n  AND trigger IN (${trigger:sqlstring})\nGROUP BY 1\nORDER BY 1"
+        }
+      ],
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "left",
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "fillOpacity": 60,
+            "lineWidth": 0
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "links": []
+}
