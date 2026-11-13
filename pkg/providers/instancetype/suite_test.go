@@ -3362,6 +3362,43 @@ var _ = Describe("InstanceTypeProvider", func() {
 				Entry("when AMI is AL2023", v1.AMIFamilyAL2023, "al2023@latest", false),
 				Entry("when AMI is BottleRocket", v1.AMIFamilyBottlerocket, "bottlerocket@latest", true),
 			)
+			// The AMI family is an input to NodeClass compatibility, so it has to be part of the offering cache key.
+			// Without it, offerings computed for one AMI family are served for another: a1 stays unavailable after a
+			// switch to Bottlerocket, and worse, stays Available after a switch to AL2023, which can't run it.
+			It("should flip availability when the NodeClass's AMI family changes, without a cache flush", func() {
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyAL2023)
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", false)
+
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "bottlerocket@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyBottlerocket)
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", true)
+
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyAL2023)
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", false)
+			})
+			// The family is normally derived from the alias, with spec.amiFamily unset.
+			It("should flip availability when only the AMI alias changes, without a cache flush", func() {
+				nodeClass.Spec.AMIFamily = nil
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				Expect(nodeClass.AMIFamily()).To(Equal(v1.AMIFamilyAL2023))
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", false)
+
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "bottlerocket@latest"}}
+				Expect(nodeClass.AMIFamily()).To(Equal(v1.AMIFamilyBottlerocket))
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", true)
+			})
+			// The key has to distinguish every family, not just AL2023 from Bottlerocket.
+			It("should flip availability when switching from AL2023 to a Custom AMI family, without a cache flush", func() {
+				nodeClass.Spec.AMIFamily = nil
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{Alias: "al2023@latest"}}
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", false)
+
+				nodeClass.Spec.AMIFamily = lo.ToPtr(v1.AMIFamilyCustom)
+				nodeClass.Spec.AMISelectorTerms = []v1.AMISelectorTerm{{ID: "ami-123"}}
+				ExpectOfferingsAvailable(ctx, nodeClass, "a1.medium", true)
+			})
 		})
 		Context("Network Interfaces", func() {
 			It("should mark instance type offering as available when it supports network interface configuration", func() {
@@ -4265,4 +4302,18 @@ type countingResolver struct {
 func (r *countingResolver) Resolve(ctx context.Context, info ec2types.InstanceTypeInfo, zones []string, nodeClass instancetype.NodeClass, parsedKubelet *v1.ParsedKubeletConfig) (*corecloudprovider.InstanceType, error) {
 	r.calls.Add(1)
 	return r.Resolver.Resolve(ctx, info, zones, nodeClass, parsedKubelet)
+}
+
+// ExpectOfferingsAvailable asserts whether an instance type's offerings are available for the given NodeClass, listing
+// them through the provider so the offering cache is exercised rather than bypassed.
+func ExpectOfferingsAvailable(ctx context.Context, nodeClass *v1.EC2NodeClass, name string, available bool) {
+	GinkgoHelper()
+	instanceTypes, err := awsEnv.InstanceTypesProvider.List(ctx, nodeClass)
+	Expect(err).ToNot(HaveOccurred())
+	it, ok := lo.Find(instanceTypes, func(it *corecloudprovider.InstanceType) bool { return it.Name == name })
+	Expect(ok).To(BeTrue(), "instance type %s should be listed", name)
+	Expect(it.Offerings).ToNot(BeEmpty())
+	for _, o := range it.Offerings {
+		Expect(o.Available).To(Equal(available), "offering %s", o.Requirements)
+	}
 }
