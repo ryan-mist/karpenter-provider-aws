@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -86,7 +87,8 @@ func result() *perf.Result {
 	}
 }
 
-var run = performancev2.RunInfo{RunID: "123", RunAttempt: "2", Trigger: "schedule", Cluster: "perf-nodepools-123-2", Region: "us-west-2",
+var run = performancev2.RunInfo{RunID: "123", RunAttempt: "2", RunURL: "https://github.com/aws/karpenter-provider-aws/actions/runs/123",
+	CoreCommit: "d9c8e7cf2445", Trigger: "schedule", Cluster: "perf-nodepools-123-2", Region: "us-west-2",
 	K8sVersion: "1.36", ControlPlaneTier: "tier-xl", ControllerShape: "cpu=8/8,mem=24Gi/24Gi"}
 
 var _ = Describe("Timestream sink", func() {
@@ -122,15 +124,43 @@ var _ = Describe("Timestream sink", func() {
 		Expect(r.TimeUnit).To(Equal(timestreamtypes.TimeUnitMilliseconds))
 		Expect(dimensions(r)).To(Equal(map[string]string{
 			"provider": "aws-kwok", "scenario": "nodepools", "phase": "scheduling", "id": "nodepools/scheduling",
-			"schema_version": "2", "commit": "abc123", "sizes": "nodepools=1000,pods=100",
-			"run_id": "123", "run_attempt": "2", "trigger": "schedule", "cluster": "perf-nodepools-123-2", "region": "us-west-2",
-			"k8s_version": "1.36", "cp_tier": "tier-xl", "controller_shape": "cpu=8/8,mem=24Gi/24Gi",
-			"tier": "experimental", "upper": "true",
+			"schema_version": "2", "commit": "abc123", "aws_commit": "abc123", "core_commit": "d9c8e7cf2445", "sizes": "nodepools=1000,pods=100",
+			"run_id": "123", "run_attempt": "2", "run_url": "https://github.com/aws/karpenter-provider-aws/actions/runs/123",
+			"trigger": "schedule", "cluster": "perf-nodepools-123-2", "region": "us-west-2",
+			"k8s_version": "1.36", "cp_tier": "tier-xl", "controller_shape": "cpu=8/8,mem=24Gi/24Gi", "tier": "experimental",
 		}))
-		Expect(measures(r)).To(Equal(map[string]measure{
-			"value": {"3000.5", "DOUBLE"}, "bound": {"3281.8", "DOUBLE"}, "gated": {"true", "BOOLEAN"},
-			"passed": {"true", "BOOLEAN"}, "overridden": {"false", "BOOLEAN"},
-		}))
+		m := measures(r)
+		Expect(m).To(HaveKeyWithValue("headroom_pct", HaveField("Type", "DOUBLE")))
+		headroom := lo.Must(strconv.ParseFloat(m["headroom_pct"].Value, 64))
+		Expect(headroom).To(BeNumerically("~", (3281.8-3000.5)/3281.8*100, 1e-9))
+		delete(m, "headroom_pct")
+		Expect(m).To(Equal(map[string]measure{
+			"value": {"3000.5", "DOUBLE"}, "bound": {"3281.8", "DOUBLE"}, "gated": {"true", "BOOLEAN"}, "upper": {"true", "BOOLEAN"},
+			"passed": {"true", "BOOLEAN"}, "overridden": {"false", "BOOLEAN"}, "status": {"WARN", "VARCHAR"},
+		}), "8.6%% headroom is under 10%%, so WARN")
+	})
+
+	It("signs headroom_pct by the gate's direction and sets status PASS, WARN or FAIL", func() {
+		rep := result()
+		rep.ReservedCPUUtil, rep.Nodes = 0.5, 120
+		rep.Gates = []perf.GateResult{
+			{Metric: "cpu_util", Value: 0.5, Bound: 0.4, Upper: false, Tier: perf.TierStable, Passed: true},
+			{Metric: "nodes", Value: 120, Bound: 100, Upper: true, Tier: perf.TierStable, Passed: false},
+			{Metric: "cpu_cores", Value: 2.25, Bound: 4.5, Upper: true, Tier: perf.TierExperimental, Passed: true},
+		}
+		ts := &fakeTimestream{}
+		Expect(performancev2.TimestreamSink(ts, "db", "t", run, metrics)(context.Background(), rep)).To(Succeed())
+		for metric, want := range map[string]struct {
+			headroom      float64
+			upper, status string
+		}{"cpu_util": {25, "false", "PASS"}, "nodes": {-20, "true", "FAIL"}, "cpu_cores": {50, "true", "PASS"}} {
+			r, ok := record(ts.records(), metric)
+			Expect(ok).To(BeTrue())
+			m := measures(r)
+			Expect(lo.Must(strconv.ParseFloat(m["headroom_pct"].Value, 64))).To(BeNumerically("~", want.headroom, 1e-9), metric)
+			Expect(m["upper"]).To(Equal(measure{want.upper, "BOOLEAN"}), metric)
+			Expect(m["status"]).To(Equal(measure{want.status, "VARCHAR"}), metric)
+		}
 	})
 
 	It("writes an ungated metric as measured, with no bound or result, and leaves out empty dimensions", func() {
@@ -138,14 +168,14 @@ var _ = Describe("Timestream sink", func() {
 		Expect(performancev2.TimestreamSink(ts, "db", "t", performancev2.RunInfo{}, metrics)(context.Background(), result())).To(Succeed())
 		r, ok := record(ts.records(), "cpu_cores")
 		Expect(ok).To(BeTrue())
-		Expect(measures(r)).To(Equal(map[string]measure{"value": {"2.25", "DOUBLE"}, "gated": {"false", "BOOLEAN"}}))
+		Expect(measures(r)).To(Equal(map[string]measure{"value": {"2.25", "DOUBLE"}, "gated": {"false", "BOOLEAN"}, "upper": {"true", "BOOLEAN"}}))
 		Expect(dimensions(r)).To(Equal(map[string]string{
 			"provider": "aws-kwok", "scenario": "nodepools", "phase": "scheduling", "id": "nodepools/scheduling",
-			"schema_version": "2", "commit": "abc123", "sizes": "nodepools=1000,pods=100", "tier": "measured", "upper": "true",
+			"schema_version": "2", "commit": "abc123", "aws_commit": "abc123", "sizes": "nodepools=1000,pods=100", "tier": "measured",
 		}))
 		r, ok = record(ts.records(), "cpu_util")
 		Expect(ok).To(BeTrue())
-		Expect(dimensions(r)).To(HaveKeyWithValue("upper", "false"))
+		Expect(measures(r)).To(HaveKeyWithValue("upper", measure{"false", "BOOLEAN"}))
 	})
 
 	It("skips NaN and Inf values", func() {
@@ -195,11 +225,20 @@ var _ = Describe("Timestream sink", func() {
 
 	It("reads the run's dimensions from the CI environment", func() {
 		for k, v := range map[string]string{"GITHUB_RUN_ID": "9", "GITHUB_RUN_ATTEMPT": "1", "GITHUB_EVENT_NAME": "workflow_dispatch",
-			"CLUSTER_NAME": "perf-pods-9-1", "AWS_REGION": "us-west-2", "K8S_VERSION": "1.36", "CP_TIER": "standard", "CONTROLLER_SHAPE": "cpu=-/-,mem=-/-"} {
+			"CLUSTER_NAME": "perf-pods-9-1", "AWS_REGION": "us-west-2", "K8S_VERSION": "1.36", "CP_TIER": "standard", "CONTROLLER_SHAPE": "cpu=-/-,mem=-/-",
+			"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "aws/karpenter-provider-aws"} {
 			GinkgoT().Setenv(k, v)
 		}
-		Expect(performancev2.RunInfoFromEnv()).To(Equal(performancev2.RunInfo{RunID: "9", RunAttempt: "1", Trigger: "workflow_dispatch",
+		Expect(performancev2.RunInfoFromEnv()).To(Equal(performancev2.RunInfo{RunID: "9", RunAttempt: "1",
+			RunURL: "https://github.com/aws/karpenter-provider-aws/actions/runs/9", CoreCommit: performancev2.CoreCommit(), Trigger: "workflow_dispatch",
 			Cluster: "perf-pods-9-1", Region: "us-west-2", K8sVersion: "1.36", ControlPlaneTier: "standard", ControllerShape: "cpu=-/-,mem=-/-"}))
+		GinkgoT().Setenv("GITHUB_REPOSITORY", "")
+		Expect(performancev2.RunInfoFromEnv().RunURL).To(BeEmpty(), "no run_url unless all three parts are set")
+	})
+
+	It("takes core_commit from the sigs.k8s.io/karpenter version this binary was built with", func() {
+		// go.mod pins a pseudo-version, so the commit is its 12-character hash
+		Expect(performancev2.CoreCommit()).To(MatchRegexp(`^[0-9a-f]{12}$`))
 	})
 })
 
