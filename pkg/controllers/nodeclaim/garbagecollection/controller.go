@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	nodeclaimutils "sigs.k8s.io/karpenter/pkg/utils/nodeclaim"
 
@@ -39,15 +40,19 @@ import (
 )
 
 type Controller struct {
-	kubeClient      client.Client
-	cloudProvider   cloudprovider.CloudProvider
+	kubeClient    client.Client
+	cloudProvider cloudprovider.CloudProvider
+	// launched holds providerIDs this process launched whose NodeClaim status write has not yet been observed. The
+	// NodeClaim informer cache can't protect those instances: the status write may be throttled or still in flight.
+	launched        *launched.Registry
 	successfulCount uint64 // keeps track of successful reconciles for more aggressive requeueing near the start of the controller
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider) *Controller {
+func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, launchedRegistry *launched.Registry) *Controller {
 	return &Controller{
 		kubeClient:      kubeClient,
 		cloudProvider:   cloudProvider,
+		launched:        launchedRegistry,
 		successfulCount: 0,
 	}
 }
@@ -79,7 +84,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	}
 	errs := make([]error, len(cloudNodeClaims))
 	workqueue.ParallelizeUntil(ctx, 100, len(cloudNodeClaims), func(i int) {
-		if nc := cloudNodeClaims[i]; !clusterProviderIDs.Has(nc.Status.ProviderID) && time.Since(nc.CreationTimestamp.Time) > time.Second*30 {
+		if nc := cloudNodeClaims[i]; !clusterProviderIDs.Has(nc.Status.ProviderID) && !c.launched.HasProviderID(nc.Status.ProviderID) && time.Since(nc.CreationTimestamp.Time) > time.Second*30 {
 			errs[i] = c.garbageCollect(ctx, cloudNodeClaims[i], nodeList)
 		}
 	})

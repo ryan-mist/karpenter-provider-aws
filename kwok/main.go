@@ -15,6 +15,8 @@ package main
 import (
 	"sync"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
+
 	"github.com/samber/lo"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
 	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
@@ -72,6 +74,9 @@ func main() {
 		op.EC2API.ReadBackup(ctx)
 	})
 
+	// Shared so instance garbage collection can see launches whose NodeClaim status write is still pending
+	launchedRegistry := launched.NewRegistry(op.Clock)
+
 	op.
 		WithControllers(ctx, corecontrollers.NewControllers(
 			ctx,
@@ -84,6 +89,7 @@ func main() {
 			clusterState,
 			op.InstanceTypeStore,
 			op.PredictionStore,
+			corecontrollers.WithLaunchedRegistry(launchedRegistry),
 			corecontrollers.WithVPAPrediction(),
 		)...).
 		WithControllers(ctx, controllers.NewControllers(
@@ -115,6 +121,7 @@ func main() {
 			op.InstanceStatusProvider,
 			lo.ToPtr(""),
 			op.CELEnvironment,
+			launchedRegistry,
 		)...).
 		Start(ctx)
 	wg.Wait()
