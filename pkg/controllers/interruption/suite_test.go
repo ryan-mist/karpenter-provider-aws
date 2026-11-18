@@ -49,6 +49,7 @@ import (
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages/capacityreservationinterruption"
+	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages/rebalancerecommendation"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages/scheduledchange"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages/spotinterruption"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption/messages/statechange"
@@ -384,6 +385,62 @@ var _ = Describe("InterruptionHandling", func() {
 			ExpectSingletonReconciled(ctx, controller)
 			Expect(sqsapi.ReceiveMessageBehavior.SuccessfulCalls()).To(Equal(1))
 			ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(sqsapi.DeleteMessageBehavior.SuccessfulCalls()).To(Equal(1))
+		})
+		It("should not disrupt the NodeClaim or mark its offering unavailable when receiving a rebalance recommendation", func() {
+			interruption.ReceivedMessages.Reset()
+			nodeClaim.Labels = lo.Assign(nodeClaim.Labels, map[string]string{
+				corev1.LabelTopologyZone:       "coretest-zone-1a",
+				corev1.LabelInstanceTypeStable: "t3.large",
+				karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeSpot,
+			})
+			ExpectMessagesCreated(rebalanceRecommendationMessage(lo.Must(utils.ParseInstanceID(nodeClaim.Status.ProviderID))))
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+
+			ExpectSingletonReconciled(ctx, controller)
+			ExpectMetricCounterValue(interruption.ReceivedMessages, 1, map[string]string{"message_type": "rebalance_recommendation"})
+			Expect(sqsapi.ReceiveMessageBehavior.SuccessfulCalls()).To(Equal(1))
+			// A rebalance recommendation is advisory: the instance hasn't been interrupted, so keep it and its offering
+			nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+			Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+			Expect(unavailableOfferingsCache.IsUnavailable("t3.large", "coretest-zone-1a", []string{}, karpv1.CapacityTypeSpot)).To(BeFalse())
+			_, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{"nodepool": "default"})
+			Expect(found).To(BeFalse())
+			Expect(sqsapi.DeleteMessageBehavior.SuccessfulCalls()).To(Equal(1))
+		})
+		DescribeTable("should ignore AWS Health events that aren't EC2 scheduled changes",
+			func(service, eventTypeCategory string) {
+				interruption.ReceivedMessages.Reset()
+				msg := scheduledChangeMessage(lo.Must(utils.ParseInstanceID(nodeClaim.Status.ProviderID)))
+				msg.Detail.Service = service
+				msg.Detail.EventTypeCategory = eventTypeCategory
+				ExpectMessagesCreated(msg)
+				ExpectApplied(ctx, env.Client, nodeClaim, node)
+
+				ExpectSingletonReconciled(ctx, controller)
+				ExpectMetricCounterValue(interruption.ReceivedMessages, 1, map[string]string{"message_type": "no_op"})
+				Expect(sqsapi.ReceiveMessageBehavior.SuccessfulCalls()).To(Equal(1))
+				nodeClaim = ExpectExists(ctx, env.Client, nodeClaim)
+				Expect(nodeClaim.DeletionTimestamp.IsZero()).To(BeTrue())
+				Expect(sqsapi.DeleteMessageBehavior.SuccessfulCalls()).To(Equal(1))
+			},
+			Entry("a non-EC2 service", "RDS", "scheduledChange"),
+			Entry("an EC2 issue", "EC2", "issue"),
+			Entry("an EC2 account notification", "EC2", "accountNotification"),
+		)
+		It("should delete a message that has no body", func() {
+			interruption.ReceivedMessages.Reset()
+			sqsapi.ReceiveMessageBehavior.Output.Set(&servicesqs.ReceiveMessageOutput{
+				Messages: []sqstypes.Message{{MessageId: aws.String(string(uuid.NewUUID()))}},
+			})
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+
+			ExpectSingletonReconciled(ctx, controller)
+			Expect(sqsapi.ReceiveMessageBehavior.SuccessfulCalls()).To(Equal(1))
+			ExpectExists(ctx, env.Client, nodeClaim)
+			// Unparseable messages are deleted without being counted as received
+			_, found := FindMetricWithLabelValues("karpenter_interruption_received_messages_total", nil)
+			Expect(found).To(BeFalse())
 			Expect(sqsapi.DeleteMessageBehavior.SuccessfulCalls()).To(Equal(1))
 		})
 		It("should mark the ICE cache for the offering when getting a spot interruption warning", func() {
@@ -1039,6 +1096,26 @@ func stateChangeMessage(involvedInstanceID, state string) statechange.Message {
 		Detail: statechange.Detail{
 			InstanceID: involvedInstanceID,
 			State:      state,
+		},
+	}
+}
+
+func rebalanceRecommendationMessage(involvedInstanceID string) rebalancerecommendation.Message {
+	return rebalancerecommendation.Message{
+		Metadata: messages.Metadata{
+			Version:    "0",
+			Account:    defaultAccountID,
+			DetailType: "EC2 Instance Rebalance Recommendation",
+			ID:         string(uuid.NewUUID()),
+			Region:     fake.DefaultRegion,
+			Resources: []string{
+				fmt.Sprintf("arn:aws:ec2:%s:instance/%s", fake.DefaultRegion, involvedInstanceID),
+			},
+			Source: ec2Source,
+			Time:   time.Now(),
+		},
+		Detail: rebalancerecommendation.Detail{
+			InstanceID: involvedInstanceID,
 		},
 	}
 }
