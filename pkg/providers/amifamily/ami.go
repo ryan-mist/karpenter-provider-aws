@@ -45,6 +45,9 @@ import (
 
 type Provider interface {
 	List(ctx context.Context, nodeClass *v1.EC2NodeClass) (AMIs, error)
+	// Images returns the attributes of the given images keyed by ID, from cache when possible. Images that can't be
+	// described are absent from the result.
+	Images(ctx context.Context, ids ...string) (map[string]*Image, error)
 }
 
 type DefaultProvider struct {
@@ -194,6 +197,7 @@ func (p *DefaultProvider) amis(ctx context.Context, nodeClass *v1.EC2NodeClass) 
 				return nil, fmt.Errorf("describing images, %w", err)
 			}
 			for _, image := range page.Images {
+				p.cacheImage(image)
 				arch, ok := v1.AWSToKubeArchitectures[string(image.Architecture)]
 				if !ok {
 					continue

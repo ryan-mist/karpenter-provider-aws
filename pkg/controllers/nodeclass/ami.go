@@ -70,6 +70,11 @@ func (a *AMI) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeClass) (reconc
 		log.FromContext(ctx).WithValues("ids", uniqueAMIs).V(1).Info("discovered amis")
 	}
 
+	// The in-place upgrade result is owned by the InPlaceUpgrade reconciler, which runs next. Carry it over by ID so
+	// rebuilding the list doesn't drop it, even if that reconciler fails this round.
+	inPlaceUpgrades := lo.SliceToMap(lo.Filter(nodeClass.Status.AMIs, func(ami v1.AMI, _ int) bool {
+		return ami.InPlaceUpgrade != nil
+	}), func(ami v1.AMI) (string, *v1.InPlaceUpgrade) { return ami.ID, ami.InPlaceUpgrade })
 	nodeClass.Status.AMIs = lo.Map(amis, func(ami amifamily.AMI, _ int) v1.AMI {
 		reqs := lo.Map(ami.Requirements.NodeSelectorRequirements(), func(item karpv1.NodeSelectorRequirementWithMinValues, _ int) corev1.NodeSelectorRequirement {
 			return corev1.NodeSelectorRequirement{
@@ -86,10 +91,11 @@ func (a *AMI) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeClass) (reconc
 			return reqs[i].Key < reqs[j].Key
 		})
 		return v1.AMI{
-			Name:         ami.Name,
-			ID:           ami.AmiID,
-			Deprecated:   ami.Deprecated,
-			Requirements: reqs,
+			Name:           ami.Name,
+			ID:             ami.AmiID,
+			Deprecated:     ami.Deprecated,
+			Requirements:   reqs,
+			InPlaceUpgrade: inPlaceUpgrades[ami.AmiID].DeepCopy(),
 		}
 	})
 
