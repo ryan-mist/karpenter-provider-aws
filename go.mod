@@ -156,3 +156,5 @@ require (
 )
 
 replace github.com/google/cel-go v0.31.0 => cel.dev/cel-go v0.31.0
+
+replace sigs.k8s.io/karpenter => ../wt-rvr-core

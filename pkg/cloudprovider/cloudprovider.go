@@ -322,6 +322,20 @@ func (c *CloudProvider) DisruptionReasons() []karpv1.DisruptionReason {
 	return nil
 }
 
+// GetDriftStatus reports AMI, subnet, security group and other NodeClass drift. Every drift is resolved by
+// replacing the node for now.
+func (c *CloudProvider) GetDriftStatus(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftStatus, error) {
+	reason, err := c.IsDrifted(ctx, nodeClaim)
+	if err != nil {
+		return cloudprovider.DriftStatus{}, err
+	}
+	if reason == "" {
+		return cloudprovider.NotDrifted, nil
+	}
+	return cloudprovider.DriftStatus{Action: cloudprovider.ReplaceNode, Reason: reason}, nil
+}
+
+// IsDrifted returns the first drift reason for the NodeClaim, or "" when it has not drifted.
 func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
 	// Not needed when GetInstanceTypes removes nodepool dependency
 	nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]
