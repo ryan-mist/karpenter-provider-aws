@@ -175,7 +175,25 @@ type EC2NodeClassSpec struct {
 	// CPUOptions defines the CPU options for the instance.
 	// +optional
 	CPUOptions *CPUOptions `json:"cpuOptions,omitempty"`
+	// AMIDriftPolicy controls how Karpenter resolves AMI drift. ReplaceInstance (the default) replaces the node.
+	// ReplaceRootVolume replaces the instance's root volume from the new AMI in place, keeping instance store and
+	// data volumes, when AMI drift is the only drift and every in-place safety check passes. Otherwise the node is
+	// replaced. The field is excluded from the drift hash so changing it never drifts nodes on its own.
+	// +kubebuilder:validation:Enum:={ReplaceInstance,ReplaceRootVolume}
+	// +kubebuilder:default:=ReplaceInstance
+	// +optional
+	AMIDriftPolicy AMIDriftPolicy `json:"amiDriftPolicy,omitempty" hash:"ignore"`
 }
+
+// AMIDriftPolicy controls how Karpenter resolves AMI drift.
+type AMIDriftPolicy string
+
+const (
+	// AMIDriftPolicyReplaceInstance replaces drifted nodes.
+	AMIDriftPolicyReplaceInstance AMIDriftPolicy = "ReplaceInstance"
+	// AMIDriftPolicyReplaceRootVolume replaces the root volume of drifted nodes in place when it is safe to.
+	AMIDriftPolicyReplaceRootVolume AMIDriftPolicy = "ReplaceRootVolume"
+)
 
 // SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
 // If multiple fields are used for selection, the requirements are ANDed.
@@ -575,6 +593,11 @@ func (in *EC2NodeClass) Hash(caBundle *string) string {
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
 	})))
+}
+
+// ReplacesRootVolumeOnAMIDrift returns whether AMI drift should be resolved in place by replacing the root volume.
+func (in *EC2NodeClass) ReplacesRootVolumeOnAMIDrift() bool {
+	return in.Spec.AMIDriftPolicy == AMIDriftPolicyReplaceRootVolume
 }
 
 func (in *EC2NodeClass) LegacyInstanceProfileName(clusterName, region string) string {

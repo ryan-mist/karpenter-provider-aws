@@ -78,6 +78,21 @@ type AMI struct {
 	// Requirements of the AMI to be utilized on an instance type
 	// +required
 	Requirements []corev1.NodeSelectorRequirement `json:"requirements"`
+	// InPlaceUpgrade reports whether nodes can move to this AMI by replacing their root volume in place. It is only
+	// set when the EC2NodeClass's amiDriftPolicy is ReplaceRootVolume. It is excluded from hashing so that changes
+	// to it don't invalidate caches keyed on the resolved AMIs.
+	// +optional
+	InPlaceUpgrade *InPlaceUpgrade `json:"inPlaceUpgrade,omitempty" hash:"ignore"`
+}
+
+// InPlaceUpgrade reports whether an AMI passes the AMI-level checks for an in-place root volume replacement.
+type InPlaceUpgrade struct {
+	// Supported is true when nodes can move to this AMI in place, subject to per-node checks.
+	// +required
+	Supported bool `json:"supported"`
+	// Reason names the check that failed when Supported is false.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 }
 
 type CapacityReservation struct {

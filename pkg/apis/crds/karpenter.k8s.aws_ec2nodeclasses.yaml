@@ -57,6 +57,17 @@ spec:
                 EC2NodeClassSpec is the top level specification for the AWS Karpenter Provider.
                 This will contain configuration necessary to launch instances in AWS.
               properties:
+                amiDriftPolicy:
+                  default: ReplaceInstance
+                  description: |-
+                    AMIDriftPolicy controls how Karpenter resolves AMI drift. ReplaceInstance (the default) replaces the node.
+                    ReplaceRootVolume replaces the instance's root volume from the new AMI in place, keeping instance store and
+                    data volumes, when AMI drift is the only drift and every in-place safety check passes. Otherwise the node is
+                    replaced. The field is excluded from the drift hash so changing it never drifts nodes on its own.
+                  enum:
+                    - ReplaceInstance
+                    - ReplaceRootVolume
+                  type: string
                 amiFamily:
                   description: |-
                     AMIFamily dictates the UserData format and default BlockDeviceMappings used when generating launch templates.
@@ -684,6 +695,21 @@ spec:
                       id:
                         description: ID of the AMI
                         type: string
+                      inPlaceUpgrade:
+                        description: |-
+                          InPlaceUpgrade reports whether nodes can move to this AMI by replacing their root volume in place. It is only
+                          set when the EC2NodeClass's amiDriftPolicy is ReplaceRootVolume. It is excluded from hashing so that changes
+                          to it don't invalidate caches keyed on the resolved AMIs.
+                        properties:
+                          reason:
+                            description: Reason names the check that failed when Supported is false.
+                            type: string
+                          supported:
+                            description: Supported is true when nodes can move to this AMI in place, subject to per-node checks.
+                            type: boolean
+                        required:
+                          - supported
+                        type: object
                       name:
                         description: Name of the AMI
                         type: string
