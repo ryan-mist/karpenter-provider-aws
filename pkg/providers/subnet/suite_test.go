@@ -16,6 +16,7 @@ package subnet_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"testing"
@@ -421,28 +422,31 @@ var _ = Describe("SubnetProvider", func() {
 			}, subnets)
 
 			cacheItems := awsEnv.SubnetCache.Items()
-			// There should be 2 cache entries one for each semantic.
-			Expect(cacheItems).To(HaveLen(2))
+			// Caching is per filter set: one entry for the AND set, one for each OR set
+			Expect(cacheItems).To(HaveLen(3))
 			// Extract cached subnet arrays for comparison
 			cachedSubnets := make([][]ec2types.Subnet, 0, len(cacheItems))
 			for _, item := range cacheItems {
 				cachedSubnets = append(cachedSubnets, item.Object.([]ec2types.Subnet))
 			}
-			// Expect cache to contain result of both look ups.
-			Expect(cachedSubnets).To(ContainElement(ContainElements(
+			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
 						SubnetId:  aws.String("test-subnet-id-1"),
 						SubnetArn: aws.String("test-subnet-arn-1"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-1"), Value: aws.String("tag-value-1")}},
 					},
+				},
+			))
+			Expect(cachedSubnets).To(ContainElement(
+				[]ec2types.Subnet{
 					{
 						SubnetId:  aws.String("test-subnet-id-2"),
 						SubnetArn: aws.String("test-subnet-arn-2"),
 						Tags:      []ec2types.Tag{{Key: aws.String("tag-key-2"), Value: aws.String("tag-value-2")}},
 					},
 				},
-			)))
+			))
 			Expect(cachedSubnets).To(ContainElement(
 				[]ec2types.Subnet{
 					{
@@ -452,6 +456,43 @@ var _ = Describe("SubnetProvider", func() {
 					},
 				},
 			))
+		})
+		It("should share a cache entry across NodeClasses with an identical selector term", func() {
+			awsEnv.EC2API.DescribeSubnetsBehavior.Output.Set(&ec2.DescribeSubnetsOutput{Subnets: []ec2types.Subnet{
+				{SubnetId: aws.String("test-subnet-id-1"), SubnetArn: aws.String("test-subnet-arn-1")},
+			}})
+			nodeClass.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(1))
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
+		})
+		It("should reuse the cache entry for a shared selector term across NodeClasses with partially overlapping selectors", func() {
+			awsEnv.EC2API.DescribeSubnetsBehavior.Output.Set(&ec2.DescribeSubnetsOutput{Subnets: []ec2types.Subnet{
+				{SubnetId: aws.String("test-subnet-id-1"), SubnetArn: aws.String("test-subnet-arn-1")},
+			}})
+			nodeClass.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"foo": "bar"}}}
+			_, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
+			Expect(err).To(BeNil())
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
+
+			nodeClass2 := test.EC2NodeClass()
+			nodeClass2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{
+				{Tags: map[string]string{"foo": "bar"}},
+				{Tags: map[string]string{"baz": "qux"}},
+			}
+			_, err = awsEnv.SubnetProvider.List(ctx, nodeClass2)
+			Expect(err).To(BeNil())
+
+			// Only the new {baz=qux} filter set triggers another call
+			Expect(awsEnv.SubnetCache.Items()).To(HaveLen(2))
+			Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(2))
 		})
 	})
 	It("should not cause data races when calling List() simultaneously", func() {
@@ -562,3 +603,80 @@ func ExpectConsistsOfSubnets(expected, actual []ec2types.Subnet) {
 		Expect(ok).To(BeTrue(), `Expected subnet with {"SubnetId": %q, "AvailabilityZone": %q, "AvailableIpAddressCount": %q} to exist`, lo.FromPtr(elem.SubnetId), lo.FromPtr(elem.AvailabilityZone), lo.FromPtr(elem.AvailableIpAddressCount))
 	}
 }
+
+var _ = Describe("SubnetProvider cache sharing (test gaps)", func() {
+	ids := func(subnets []ec2types.Subnet) []string {
+		return lo.Map(subnets, func(s ec2types.Subnet, _ int) string { return lo.FromPtr(s.SubnetId) })
+	}
+	It("should share a cache entry across NodeClasses with distinct UIDs and Generations", func() {
+		nc1 := test.EC2NodeClass()
+		nc1.UID, nc1.Generation = "uid-1", 1
+		nc1.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"Name": "test-subnet-1"}}}
+		nc2 := test.EC2NodeClass()
+		nc2.UID, nc2.Generation = "uid-2", 7
+		nc2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"Name": "test-subnet-1"}}}
+		_, err := awsEnv.SubnetProvider.List(ctx, nc1)
+		Expect(err).ToNot(HaveOccurred())
+		subnets, err := awsEnv.SubnetProvider.List(ctx, nc2)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ids(subnets)).To(ConsistOf("subnet-test1"))
+		Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(1))
+	})
+	It("should return the union of per-term results for partially overlapping NodeClasses", func() {
+		nc1 := test.EC2NodeClass()
+		nc1.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"Name": "test-subnet-1"}}}
+		subnets, err := awsEnv.SubnetProvider.List(ctx, nc1)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ids(subnets)).To(ConsistOf("subnet-test1"))
+
+		nc2 := test.EC2NodeClass()
+		nc2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{
+			{Tags: map[string]string{"Name": "test-subnet-1"}},
+			{Tags: map[string]string{"Name": "test-subnet-2"}},
+		}
+		subnets, err = awsEnv.SubnetProvider.List(ctx, nc2)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ids(subnets)).To(ConsistOf("subnet-test1", "subnet-test2"))
+
+		subnets, err = awsEnv.SubnetProvider.List(ctx, nc1)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ids(subnets)).To(ConsistOf("subnet-test1"))
+		Expect(awsEnv.EC2API.DescribeSubnetsBehavior.Calls()).To(Equal(2))
+	})
+	It("should dedupe subnets matched by overlapping terms on both the uncached and cached paths", func() {
+		nodeClass.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{
+			{Tags: map[string]string{"Name": "test-subnet-1"}},
+			{ID: "subnet-test1"},
+			{ID: "subnet-test2"},
+			{Tags: map[string]string{"Name": "test-subnet-2"}},
+		}
+		for range 2 {
+			subnets, err := awsEnv.SubnetProvider.List(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ids(subnets)).To(ConsistOf("subnet-test1", "subnet-test2"))
+		}
+	})
+	It("should not cache a failed filter set, and should keep the filter sets resolved before the failure", func() {
+		nc1 := test.EC2NodeClass()
+		nc1.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{{Tags: map[string]string{"Name": "test-subnet-1"}}}
+		_, err := awsEnv.SubnetProvider.List(ctx, nc1)
+		Expect(err).ToNot(HaveOccurred())
+
+		nc2 := test.EC2NodeClass()
+		nc2.Spec.SubnetSelectorTerms = []v1.SubnetSelectorTerm{
+			{Tags: map[string]string{"Name": "test-subnet-1"}},
+			{Tags: map[string]string{"Name": "test-subnet-2"}},
+		}
+		awsEnv.EC2API.DescribeSubnetsBehavior.Error.Set(fmt.Errorf("throttled"))
+		_, err = awsEnv.SubnetProvider.List(ctx, nc2)
+		Expect(err).To(HaveOccurred())
+		Expect(awsEnv.SubnetCache.Items()).To(HaveLen(1))
+
+		subnets, err := awsEnv.SubnetProvider.List(ctx, nc2)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(ids(subnets)).To(ConsistOf("subnet-test1", "subnet-test2"))
+	})
+	// Behavior change: before the PR a new NodeClass (new UID) or a spec change on an existing
+	// NodeClass (new Generation) missed the cache, so List refreshed availableIPAddressCache and
+	// cleared inflightIPs. Now a shared entry is hit and IP counts are only refreshed on TTL expiry.
+})
