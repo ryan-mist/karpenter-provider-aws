@@ -55,6 +55,7 @@ type DefaultProvider struct {
 
 	clk             clock.Clock
 	cache           *cache.Cache
+	images          *cache.Cache
 	ec2api          sdk.EC2API
 	versionProvider version.Provider
 	ssmProvider     ssm.Provider
@@ -64,6 +65,7 @@ func NewDefaultProvider(clk clock.Clock, versionProvider version.Provider, ssmPr
 	return &DefaultProvider{
 		clk:             clk,
 		cache:           cache,
+		images:          newImageCache(),
 		ec2api:          ec2api,
 		versionProvider: versionProvider,
 		ssmProvider:     ssmProvider,

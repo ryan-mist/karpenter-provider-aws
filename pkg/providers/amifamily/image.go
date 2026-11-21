@@ -22,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 )
 
@@ -77,12 +78,19 @@ func NewImage(image ec2types.Image) *Image {
 	}
 }
 
-func imageCacheKey(id string) string { return "image/" + id }
-
 func (p *DefaultProvider) cacheImage(image ec2types.Image) {
 	if id := lo.FromPtr(image.ImageId); id != "" {
-		p.cache.Set(imageCacheKey(id), NewImage(image), ImageTTL)
+		p.images.SetDefault(id, NewImage(image))
 	}
+}
+
+func newImageCache() *cache.Cache {
+	return cache.New(ImageTTL, ImageTTL)
+}
+
+// ResetImages drops cached image attributes.
+func (p *DefaultProvider) ResetImages() {
+	p.images.Flush()
 }
 
 // Images returns the attributes of the requested images, keyed by ID. Images EC2 does not return, for example
@@ -92,7 +100,7 @@ func (p *DefaultProvider) Images(ctx context.Context, ids ...string) (map[string
 	out := map[string]*Image{}
 	var misses []string
 	for _, id := range lo.Uniq(ids) {
-		if v, ok := p.cache.Get(imageCacheKey(id)); ok {
+		if v, ok := p.images.Get(id); ok {
 			if image := v.(*Image); image != nil {
 				out[id] = image
 			}
@@ -120,7 +128,7 @@ func (p *DefaultProvider) Images(ctx context.Context, ids ...string) (map[string
 		}
 		for _, id := range chunk {
 			if _, ok := found[id]; !ok {
-				p.cache.Set(imageCacheKey(id), (*Image)(nil), missingImageTTL)
+				p.images.Set(id, (*Image)(nil), missingImageTTL)
 			}
 		}
 	}
