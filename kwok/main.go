@@ -113,6 +113,7 @@ func main() {
 			op.AMIResolver,
 			op.ZonalShiftProvider,
 			op.InstanceStatusProvider,
+			op.RootVolumeProvider,
 			lo.ToPtr(""),
 			op.CELEnvironment,
 		)...).

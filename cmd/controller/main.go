@@ -101,6 +101,7 @@ func main() {
 			op.AMIResolver,
 			op.ZonalShiftProvider,
 			op.InstanceStatusProvider,
+			op.RootVolumeProvider,
 			op.CABundle,
 			op.CELEnvironment,
 		)...).
