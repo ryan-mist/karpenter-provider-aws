@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
+
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -55,6 +57,7 @@ var awsEnv *test.Environment
 var env *coretest.Environment
 var garbageCollectionController *garbagecollection.Controller
 var cloudProvider *cloudprovider.CloudProvider
+var launchedRegistry *launched.Registry
 
 func TestAPIs(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -69,7 +72,6 @@ var _ = BeforeSuite(func() {
 	awsEnv = test.NewEnvironment(ctx, env)
 	cloudProvider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, events.NewRecorder(&record.FakeRecorder{}),
 		env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore, lo.ToPtr(""))
-	garbageCollectionController = garbagecollection.NewController(env.Client, cloudProvider)
 })
 
 var _ = AfterSuite(func() {
@@ -78,6 +80,8 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	awsEnv.Reset()
+	launchedRegistry = launched.NewRegistry()
+	garbageCollectionController = garbagecollection.NewController(env.Client, cloudProvider, launchedRegistry)
 })
 
 var _ = Describe("GarbageCollection", func() {
@@ -136,6 +140,48 @@ var _ = Describe("GarbageCollection", func() {
 		ExpectCleanedUp(ctx, env.Client)
 	})
 
+	Context("Launched Registry", func() {
+		var nodeClaim *karpv1.NodeClaim
+		var node *corev1.Node
+
+		BeforeEach(func() {
+			instance.LaunchTime = aws.Time(time.Now().Add(-10 * time.Minute))
+			awsEnv.EC2API.Instances.Store(aws.ToString(instance.InstanceId), *instance)
+			// providerID not persisted yet
+			nodeClaim = coretest.NodeClaim(karpv1.NodeClaim{
+				Spec: karpv1.NodeClaimSpec{
+					NodeClassRef: &karpv1.NodeClassReference{
+						Group: object.GVK(nodeClass).Group,
+						Kind:  object.GVK(nodeClass).Kind,
+						Name:  nodeClass.Name,
+					},
+				},
+			})
+			nodeClaim.Status.ProviderID = ""
+			node = coretest.Node(coretest.NodeOptions{ProviderID: providerID})
+			ExpectApplied(ctx, env.Client, nodeClaim, node)
+		})
+		It("should not delete an instance whose launch result has not been persisted on its NodeClaim yet", func() {
+			launchedRegistry.Add(nodeClaim.UID, &karpv1.NodeClaim{Status: karpv1.NodeClaimStatus{ProviderID: providerID}})
+
+			ExpectSingletonReconciled(ctx, garbageCollectionController)
+			awsEnv.InstanceCache.Flush()
+			_, err := cloudProvider.Get(ctx, providerID)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(awsEnv.EC2API.TerminateInstancesBehavior.Calls()).To(BeZero())
+			ExpectExists(ctx, env.Client, node)
+		})
+		It("should delete the instance once it is no longer registered as launched", func() {
+			launchedRegistry.Add(nodeClaim.UID, &karpv1.NodeClaim{Status: karpv1.NodeClaimStatus{ProviderID: providerID}})
+			launchedRegistry.Delete(nodeClaim.UID)
+
+			ExpectSingletonReconciled(ctx, garbageCollectionController)
+			awsEnv.InstanceCache.Flush()
+			_, err := cloudProvider.Get(ctx, providerID)
+			Expect(karpcloudprovider.IsNodeClaimNotFoundError(err)).To(BeTrue())
+			ExpectNotFound(ctx, env.Client, node)
+		})
+	})
 	It("should delete an instance if there is no NodeClaim owner", func() {
 		// Launch time was 1m ago
 		instance.LaunchTime = aws.Time(time.Now().Add(-time.Minute))

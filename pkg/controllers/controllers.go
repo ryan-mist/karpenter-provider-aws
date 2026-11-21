@@ -17,6 +17,8 @@ package controllers
 import (
 	"context"
 
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
+
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/patrickmn/go-cache"
@@ -100,11 +102,12 @@ func NewControllers(
 	instanceStatusProvider instancestatus.Provider,
 	caBundle *string,
 	celEnv *kubeletcel.CELEnvironment,
+	launchedRegistry *launched.Registry,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclasshash.NewController(kubeClient, caBundle),
 		nodeclass.NewController(clk, kubeClient, cloudProvider, recorder, cfg.Region, subnetProvider, securityGroupProvider, amiProvider, instanceProfileProvider, instanceTypeProvider, launchTemplateProvider, capacityReservationProvider, placementGroupProvider, ec2api, validationCache, recreationCache, amiResolver, celEnv, options.FromContext(ctx).DisableDryRun),
-		nodeclaimgarbagecollection.NewController(kubeClient, cloudProvider),
+		nodeclaimgarbagecollection.NewController(kubeClient, cloudProvider, launchedRegistry),
 		nodeclaimtagging.NewController(kubeClient, cloudProvider, instanceProvider),
 		controllerspricing.NewController(pricingProvider),
 		controllersinstancetype.NewController(instanceTypeProvider),
