@@ -289,7 +289,7 @@ var _ = Describe("Controller", func() {
 	It("should return describe errors so the NodeClaim is retried", func() {
 		apply(conditionTrue, karpv1.RebootReasonIssued, fakeClock.Now())
 		fakeEC2API.DescribeReplaceRootVolumeTasksBehavior.Error.Set(&smithy.GenericAPIError{Code: "RequestLimitExceeded"})
-		ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim)
+		Expect(ExpectObjectReconcileFailed(ctx, env.Client, controller, nodeClaim).Error()).To(ContainSubstring("RequestLimitExceeded"))
 		Expect(ExpectExists(ctx, env.Client, nodeClaim).Status.ImageID).To(Equal(launchImageID))
 	})
 	It("should ignore a malformed provider ID", func() {
