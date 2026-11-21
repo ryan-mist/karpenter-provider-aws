@@ -145,10 +145,9 @@ var _ = Describe("GarbageCollection", func() {
 		var node *corev1.Node
 
 		BeforeEach(func() {
-			// Launched 10m ago: past the launch timeout and any minimum instance age
 			instance.LaunchTime = aws.Time(time.Now().Add(-10 * time.Minute))
 			awsEnv.EC2API.Instances.Store(aws.ToString(instance.InstanceId), *instance)
-			// The NodeClaim exists, but its status write recording the providerID is still being throttled
+			// providerID not persisted yet
 			nodeClaim = coretest.NodeClaim(karpv1.NodeClaim{
 				Spec: karpv1.NodeClaimSpec{
 					NodeClassRef: &karpv1.NodeClassReference{

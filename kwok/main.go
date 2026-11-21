@@ -74,7 +74,6 @@ func main() {
 		op.EC2API.ReadBackup(ctx)
 	})
 
-	// Shared so instance garbage collection can see launches whose NodeClaim status write is still pending
 	launchedRegistry := launched.NewRegistry()
 
 	op.

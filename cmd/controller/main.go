@@ -60,7 +60,6 @@ func main() {
 		v1.CapacityReservationsEnabled = true
 	}
 
-	// Shared so instance garbage collection can see launches whose NodeClaim status write is still pending
 	launchedRegistry := launched.NewRegistry()
 
 	op.

@@ -42,8 +42,6 @@ import (
 type Controller struct {
 	kubeClient    client.Client
 	cloudProvider cloudprovider.CloudProvider
-	// launched holds providerIDs this process launched whose NodeClaim status write has not yet been observed. The
-	// NodeClaim informer cache can't protect those instances: the status write may be throttled or still in flight.
 	launched        *launched.Registry
 	successfulCount uint64 // keeps track of successful reconciles for more aggressive requeueing near the start of the controller
 }
@@ -71,8 +69,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	cloudNodeClaims = lo.Filter(cloudNodeClaims, func(nc *karpv1.NodeClaim, _ int) bool {
 		return nc.DeletionTimestamp.IsZero()
 	})
-	// Snapshot launches before listing NodeClaims: an entry is only dropped after its persisted providerID is in the
-	// informer cache, so every launched instance is in at least one of the two sets
+	// Snapshot before listing NodeClaims: entries are only dropped once the providerID is in the informer cache
 	launchedProviderIDs := c.launched.ProviderIDs()
 	clusterNodeClaims, err := nodeclaimutils.ListManaged(ctx, c.kubeClient, c.cloudProvider)
 	if err != nil {
