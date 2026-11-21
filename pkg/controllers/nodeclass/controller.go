@@ -97,7 +97,12 @@ func NewController(
 	amiResolver amifamily.Resolver,
 	celEnv *kubeletcel.CELEnvironment,
 	disableDryRun bool,
+	opts ...Option,
 ) *Controller {
+	o := controllerOptions{}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	validation := NewValidationReconciler(clk, kubeClient, cloudProvider, ec2api, amiResolver, instanceTypeProvider, launchTemplateProvider, validationCache, celEnv, disableDryRun)
 	return &Controller{
 		kubeClient:              kubeClient,
@@ -108,6 +113,8 @@ func NewController(
 		validation:              validation,
 		reconcilers: []reconcile.TypedReconciler[*v1.EC2NodeClass]{
 			NewAMIReconciler(clk, amiProvider),
+			// Must run right after the AMI reconciler, which rebuilds status.amis.
+			NewInPlaceUpgradeReconciler(amiProvider, o.snapshotAPI),
 			NewCapacityReservationReconciler(clk, capacityReservationProvider),
 			NewPlacementGroupReconciler(clk, placementGroupProvider),
 			NewSubnetReconciler(clk, subnetProvider),
@@ -116,6 +123,19 @@ func NewController(
 			validation,
 		},
 	}
+}
+
+type controllerOptions struct {
+	snapshotAPI SnapshotAPI
+}
+
+// Option configures the EC2NodeClass controller.
+type Option func(*controllerOptions)
+
+// WithSnapshotAPI sets the EC2 client the in-place upgrade snapshot check uses. Without it, every private AMI on a
+// ReplaceRootVolume EC2NodeClass is reported with reason Unknown.
+func WithSnapshotAPI(api SnapshotAPI) Option {
+	return func(o *controllerOptions) { o.snapshotAPI = api }
 }
 
 func (c *Controller) Name() string {
