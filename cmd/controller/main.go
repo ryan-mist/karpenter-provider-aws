@@ -47,6 +47,8 @@ func main() {
 		op.PlacementGroupProvider,
 		op.InstanceTypeStore,
 		op.CABundle,
+		// No root volume provider yet, so amiDriftPolicy ReplaceRootVolume behaves like ReplaceInstance.
+		nil,
 		cloudprovider.WithLegacyRepairPolicies(karpoptions.FromContext(ctx).LegacyNodeRepair),
 		cloudprovider.WithRebootForRepair(options.FromContext(ctx).FeatureGates.RebootForRepair),
 	)

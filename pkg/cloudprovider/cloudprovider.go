@@ -56,6 +56,7 @@ import (
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instancetype"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/nvidiadra"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/placementgroup"
+	"github.com/aws/karpenter-provider-aws/pkg/providers/rootvolume"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/securitygroup"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -76,6 +77,7 @@ type CloudProvider struct {
 	instanceTypeStore           *nodeoverlay.InstanceTypeStore
 	nvidiaDRAProvider           nvidiadra.Provider
 	efaDRAProvider              efadra.Provider
+	rootVolumeProvider          rootvolume.Provider
 	legacyRepairPolicies        bool
 	rebootForRepair             bool
 	caBundle                    *string
@@ -92,6 +94,7 @@ func New(
 	placementGroupProvider placementgroup.Provider,
 	store *nodeoverlay.InstanceTypeStore,
 	caBundle *string,
+	rootVolumeProvider rootvolume.Provider,
 	opts ...Option,
 ) *CloudProvider {
 	c := &CloudProvider{
@@ -107,6 +110,7 @@ func New(
 		nvidiaDRAProvider:           nvidiadra.NewDefaultProvider(),
 		efaDRAProvider:              efadra.NewDefaultProvider(),
 		caBundle:                    caBundle,
+		rootVolumeProvider:          rootVolumeProvider,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -309,12 +313,23 @@ func (c *CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 	return err
 }
 
+// Reboot restarts the instance. A reboot committed to resolve AMI drift on a ReplaceRootVolume EC2NodeClass replaces
+// the root volume from the target AMI instead; every other reboot, including repair, is a plain RebootInstances.
 func (c *CloudProvider) Reboot(ctx context.Context, nodeClaim *karpv1.NodeClaim, operationID string) error {
 	id, err := utils.ParseInstanceID(nodeClaim.Status.ProviderID)
 	if err != nil {
 		return fmt.Errorf("getting instance ID, %w", err)
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("id", id))
+	if c.rootVolumeProvider != nil && disruptionReason(nodeClaim) == karpv1.DisruptionReasonDrifted {
+		nodeClass, err := c.resolveDriftNodeClass(ctx, nodeClaim)
+		if err != nil {
+			return err
+		}
+		if nodeClass != nil && nodeClass.ReplacesRootVolumeOnAMIDrift() {
+			return c.replaceRootVolume(ctx, nodeClaim, nodeClass, id, operationID)
+		}
+	}
 	return c.instanceProvider.Reboot(ctx, id, operationID)
 }
 
@@ -322,47 +337,61 @@ func (c *CloudProvider) DisruptionReasons() []karpv1.DisruptionReason {
 	return nil
 }
 
-// GetDriftStatus reports AMI, subnet, security group and other NodeClass drift. Every drift is resolved by
-// replacing the node for now.
+// GetDriftStatus reports AMI, subnet, security group and other NodeClass drift. Drift is resolved by replacing the
+// node, except AMI drift on an EC2NodeClass with amiDriftPolicy ReplaceRootVolume, which is resolved in place
+// with a reboot when it is the only drift and every in-place check passes.
 func (c *CloudProvider) GetDriftStatus(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftStatus, error) {
-	reason, err := c.IsDrifted(ctx, nodeClaim)
-	if err != nil {
-		return cloudprovider.DriftStatus{}, err
+	nodeClass, err := c.resolveDriftNodeClass(ctx, nodeClaim)
+	if err != nil || nodeClass == nil {
+		return cloudprovider.NotDrifted, err
 	}
-	if reason == "" {
-		return cloudprovider.NotDrifted, nil
+	if c.rootVolumeProvider == nil || !nodeClass.ReplacesRootVolumeOnAMIDrift() {
+		reason, err := c.isNodeClassDrifted(ctx, nodeClaim, nodeClass)
+		if err != nil {
+			return cloudprovider.DriftStatus{}, err
+		}
+		if reason == "" {
+			return cloudprovider.NotDrifted, nil
+		}
+		return cloudprovider.DriftStatus{Action: cloudprovider.ReplaceNode, Reason: reason}, nil
 	}
-	return cloudprovider.DriftStatus{Action: cloudprovider.ReplaceNode, Reason: reason}, nil
+	return c.inPlaceDriftStatus(ctx, nodeClaim, nodeClass)
 }
 
 // IsDrifted returns the first drift reason for the NodeClaim, or "" when it has not drifted.
 func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
+	nodeClass, err := c.resolveDriftNodeClass(ctx, nodeClaim)
+	if err != nil || nodeClass == nil {
+		return "", err
+	}
+	return c.isNodeClassDrifted(ctx, nodeClaim, nodeClass)
+}
+
+// resolveDriftNodeClass returns the EC2NodeClass drift is evaluated against, or nil when the NodeClaim has no
+// NodePool or NodeClass to drift from.
+func (c *CloudProvider) resolveDriftNodeClass(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1.EC2NodeClass, error) {
 	// Not needed when GetInstanceTypes removes nodepool dependency
 	nodePoolName, ok := nodeClaim.Labels[karpv1.NodePoolLabelKey]
 	if !ok {
-		return "", nil
+		return nil, nil
 	}
 	nodePool := &karpv1.NodePool{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePoolName}, nodePool); err != nil {
-		return "", client.IgnoreNotFound(err)
+		return nil, client.IgnoreNotFound(err)
 	}
 	if nodePool.Spec.Template.Spec.NodeClassRef == nil {
-		return "", nil
+		return nil, nil
 	}
 	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// We can't determine the drift status for the NodeClaim if we can no longer resolve the NodeClass
 			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
-			return "", nil
+			return nil, nil
 		}
-		return "", fmt.Errorf("resolving nodeclass, %w", err)
+		return nil, fmt.Errorf("resolving nodeclass, %w", err)
 	}
-	driftReason, err := c.isNodeClassDrifted(ctx, nodeClaim, nodeClass)
-	if err != nil {
-		return "", err
-	}
-	return driftReason, nil
+	return nodeClass, nil
 }
 
 // Name returns the CloudProvider implementation name.

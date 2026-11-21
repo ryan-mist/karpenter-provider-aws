@@ -26,6 +26,7 @@ import (
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/amifamily"
@@ -83,23 +84,45 @@ func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv
 }
 
 func (c *CloudProvider) isAMIDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1.EC2NodeClass) (cloudprovider.DriftReason, error) {
-	instanceTypeName := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
-	nodeInstanceType, err := c.instanceTypeProvider.Get(ctx, nodeClass, ec2types.InstanceType(instanceTypeName))
+	target, err := c.targetAMI(ctx, nodeClaim, nodeClass)
 	if err != nil {
-		return "", serrors.Wrap(fmt.Errorf("getting node instance type, %w", err), "instance-type", instanceTypeName)
-	}
-	if len(nodeClass.Status.AMIs) == 0 {
-		return "", fmt.Errorf("no amis exist given constraints")
+		return "", err
 	}
 	// Should never happen as ImageID is resolved when setting Launched status condition
 	if nodeClaim.Status.ImageID == "" {
 		return "", fmt.Errorf("no ami ID found in nodeClaim status")
 	}
-	mappedAMIs := amifamily.MapToInstanceTypes([]*cloudprovider.InstanceType{nodeInstanceType}, nodeClass.Status.AMIs)
-	if !lo.Contains(lo.Keys(mappedAMIs), nodeClaim.Status.ImageID) {
+	if target == nil || target.ID != nodeClaim.Status.ImageID {
 		return AMIDrift, nil
 	}
 	return "", nil
+}
+
+// targetAMI returns the status.amis entry a node of this NodeClaim's instance type would launch with today, or nil if
+// none is compatible. AMI drift and in-place root volume replacement both resolve the target through it.
+func (c *CloudProvider) targetAMI(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1.EC2NodeClass) (*v1.AMI, error) {
+	instanceTypeName := nodeClaim.Labels[corev1.LabelInstanceTypeStable]
+	nodeInstanceType, err := c.instanceTypeProvider.Get(ctx, nodeClass, ec2types.InstanceType(instanceTypeName))
+	if err != nil {
+		return nil, serrors.Wrap(fmt.Errorf("getting node instance type, %w", err), "instance-type", instanceTypeName)
+	}
+	if len(nodeClass.Status.AMIs) == 0 {
+		return nil, fmt.Errorf("no amis exist given constraints")
+	}
+	mappedAMIs := amifamily.MapToInstanceTypes([]*cloudprovider.InstanceType{nodeInstanceType}, nodeClass.Status.AMIs)
+	// MapToInstanceTypes maps each instance type to the first compatible AMI, so a single instance type maps to at
+	// most one AMI.
+	if len(mappedAMIs) != 1 {
+		return nil, nil
+	}
+	id := lo.Keys(mappedAMIs)[0]
+	ami, ok := lo.Find(nodeClass.Status.AMIs, func(ami v1.AMI) bool {
+		return ami.ID == id && nodeInstanceType.Requirements.Compatible(scheduling.NewNodeSelectorRequirements(ami.Requirements...)) == nil
+	})
+	if !ok {
+		return nil, nil
+	}
+	return &ami, nil
 }
 
 // Checks if the security groups are drifted, by comparing the subnet returned from the subnetProvider

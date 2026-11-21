@@ -71,3 +71,15 @@ func NodePoolZonalShiftCleared(nodePool *karpv1.NodePool, zoneName, zoneID strin
 		DedupeValues:   []string{string(nodePool.UID), zoneID},
 	}
 }
+
+// NodeClaimInPlaceUpgradeFallback is emitted when a NodeClaim with AMI drift on a ReplaceRootVolume EC2NodeClass is
+// replaced instead of having its root volume replaced in place. gate names the check that failed.
+func NodeClaimInPlaceUpgradeFallback(nodeClaim *karpv1.NodeClaim, gate string) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           corev1.EventTypeNormal,
+		Reason:         "InPlaceUpgradeFallback",
+		Message:        fmt.Sprintf("Replacing the node instead of its root volume, in-place check %s failed", gate),
+		DedupeValues:   []string{string(nodeClaim.UID), gate},
+	}
+}
