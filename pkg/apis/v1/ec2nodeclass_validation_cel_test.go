@@ -128,6 +128,23 @@ var _ = Describe("CEL/Validation", func() {
 			Expect(env.Client.Create(ctx, nc)).To(Succeed())
 		})
 	})
+	Context("AMIDriftPolicy", func() {
+		DescribeTable("should accept valid policies", func(policy v1.AMIDriftPolicy) {
+			nc.Spec.AMIDriftPolicy = policy
+			Expect(env.Client.Create(ctx, nc)).To(Succeed())
+		},
+			Entry("ReplaceInstance", v1.AMIDriftPolicyReplaceInstance),
+			Entry("ReplaceRootVolume", v1.AMIDriftPolicyReplaceRootVolume),
+		)
+		It("should default to ReplaceInstance", func() {
+			Expect(env.Client.Create(ctx, nc)).To(Succeed())
+			Expect(nc.Spec.AMIDriftPolicy).To(Equal(v1.AMIDriftPolicyReplaceInstance))
+		})
+		It("should fail with an unknown policy", func() {
+			nc.Spec.AMIDriftPolicy = "Reboot"
+			Expect(env.Client.Create(ctx, nc)).ToNot(Succeed())
+		})
+	})
 	Context("AMIFamily", func() {
 		amiFamilies := []string{v1.AMIFamilyAL2, v1.AMIFamilyAL2023, v1.AMIFamilyBottlerocket, v1.AMIFamilyWindows2019, v1.AMIFamilyWindows2022, v1.AMIFamilyWindows2025, v1.AMIFamilyCustom}
 		DescribeTable("should succeed with valid families", func() []interface{} {
