@@ -75,7 +75,7 @@ func main() {
 	})
 
 	// Shared so instance garbage collection can see launches whose NodeClaim status write is still pending
-	launchedRegistry := launched.NewRegistry(op.Clock)
+	launchedRegistry := launched.NewRegistry()
 
 	op.
 		WithControllers(ctx, corecontrollers.NewControllers(

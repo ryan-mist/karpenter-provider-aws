@@ -236,8 +236,8 @@ github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzG
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
-github.com/ryan-mist/karpenter v0.0.0-20261118032148-d14d744b996f h1:GS6pdjUS7+w5R0E/s0KiOgJ1chWH8V4f+FgTYMN188g=
-github.com/ryan-mist/karpenter v0.0.0-20261118032148-d14d744b996f/go.mod h1:QJWGWb2tfh3zStcPftf6lQn7eq6gQGaV8i/yMEEflDU=
+github.com/ryan-mist/karpenter v0.0.0-20261121001443-cfd3442bcd39 h1:SPQyInx3eHu/htm0Wq7O+dgaMqZ+1D6yg9hFgRfeyJc=
+github.com/ryan-mist/karpenter v0.0.0-20261121001443-cfd3442bcd39/go.mod h1:QJWGWb2tfh3zStcPftf6lQn7eq6gQGaV8i/yMEEflDU=
 github.com/samber/lo v1.53.0 h1:t975lj2py4kJPQ6haz1QMgtId2gtmfktACxIXArw3HM=
 github.com/samber/lo v1.53.0/go.mod h1:4+MXEGsJzbKGaUEQFKBq2xtfuznW9oz/WrgyzMzRoM0=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=

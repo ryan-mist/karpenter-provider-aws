@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
 
 	"sigs.k8s.io/karpenter/pkg/test/v1alpha1"
@@ -81,7 +80,7 @@ var _ = AfterSuite(func() {
 
 var _ = BeforeEach(func() {
 	awsEnv.Reset()
-	launchedRegistry = launched.NewRegistry(clock.RealClock{})
+	launchedRegistry = launched.NewRegistry()
 	garbageCollectionController = garbagecollection.NewController(env.Client, cloudProvider, launchedRegistry)
 })
 
