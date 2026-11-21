@@ -1083,6 +1083,28 @@ Size of the request batch per batcher
 - Dimensions:
   - `batcher` — The name of the request batcher the metric was recorded for, e.g. `create_fleet`, `terminate_instances`.
 
+## AWS Metrics
+
+### `karpenter_aws_root_volume_replacement_tasks_total`
+Number of replace root volume tasks Karpenter created that reached a terminal state, dimensioned by outcome.
+- Type: [Counter](https://prometheus.io/docs/concepts/metric_types/#counter)
+- Stability Level: ALPHA
+- Dimensions:
+  - `outcome` — The terminal state of the replace root volume task. See https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ReplaceRootVolumeTask.html.
+    - `succeeded` — The replacement root volume is attached and the instance is available.
+    - `failed` — The task failed and the original root volume is still attached.
+    - `failed_detached` — The task failed and the instance has no root volume attached.
+
+### `karpenter_aws_root_volume_replacement_task_duration_seconds`
+Time from a replace root volume task's start to its completion as reported by EC2, dimensioned by outcome.
+- Type: [Histogram](https://prometheus.io/docs/concepts/metric_types/#histogram)
+- Stability Level: ALPHA
+- Dimensions:
+  - `outcome` — The terminal state of the replace root volume task. See https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ReplaceRootVolumeTask.html.
+    - `succeeded` — The replacement root volume is attached and the instance is available.
+    - `failed` — The task failed and the original root volume is still attached.
+    - `failed_detached` — The task failed and the instance has no root volume attached.
+
 ## Controller Runtime Metrics
 
 ### `controller_runtime_terminal_reconcile_errors_total`
