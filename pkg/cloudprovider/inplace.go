@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/smithy-go"
@@ -60,12 +61,20 @@ const (
 	InPlaceGateKubernetesVersion        = "KubernetesVersion"
 	InPlaceGateKubernetesVersionUnknown = "KubernetesVersionUnknown"
 	InPlaceGateTargetIsCurrentImage     = "TargetIsCurrentImage"
+	// InPlaceGateChecksIncomplete is the gate when the target AMI's checks stayed Unknown past
+	// InPlaceUpgradeUnknownGracePeriod.
+	InPlaceGateChecksIncomplete = "InPlaceUpgradeUnknown"
 )
 
 const (
 	sriovNetSupportSimple                = "simple"
 	rootVolumeReplacementOperationPrefix = "replacing root volume"
 )
+
+// InPlaceUpgradeUnknownGracePeriod is how long nodes wait on a target AMI whose in-place checks couldn't complete,
+// measured from when the AMI's status.amis result became Unknown. It covers transient EC2 errors, which the
+// EC2NodeClass controller retries every minute. After it, the node is replaced so AMI drift isn't held forever.
+const InPlaceUpgradeUnknownGracePeriod = 15 * time.Minute
 
 // AMI variants, as named by amifamily.Variant.
 var (
@@ -229,9 +238,15 @@ func (c *CloudProvider) evaluateInPlace(ctx context.Context, nodeClaim *karpv1.N
 func (c *CloudProvider) inPlaceNodeGate(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1.EC2NodeClass, inst *instance.Instance, target *v1.AMI, currentImageID string) (string, error) {
 	switch {
 	case target.InPlaceUpgrade == nil:
-		return "", fmt.Errorf("in-place upgrade checks for ami %s haven't completed", target.ID)
+		// The EC2NodeClass controller fills in every entry of a ReplaceRootVolume EC2NodeClass, as Unknown when a check
+		// fails, in the same reconcile that writes it. A missing result only lasts until that reconcile.
+		return "", fmt.Errorf("in-place upgrade checks for ami %s haven't run yet", target.ID)
 	case !target.InPlaceUpgrade.Supported && target.InPlaceUpgrade.Reason == v1.InPlaceUpgradeReasonUnknown:
-		return "", fmt.Errorf("in-place upgrade checks for ami %s couldn't complete", target.ID)
+		if since := target.InPlaceUpgrade.LastTransitionTime; since != nil && c.clk.Since(since.Time) < InPlaceUpgradeUnknownGracePeriod {
+			return "", fmt.Errorf("in-place upgrade checks for ami %s couldn't complete (%s)", target.ID, target.InPlaceUpgrade.Message)
+		}
+		c.recorder.Publish(cloudproviderevents.EC2NodeClassInPlaceUpgradeIncomplete(nodeClass, target.ID, target.InPlaceUpgrade.Message))
+		return InPlaceGateChecksIncomplete, nil
 	case !target.InPlaceUpgrade.Supported:
 		return target.InPlaceUpgrade.Reason, nil
 	case target.ID == currentImageID:

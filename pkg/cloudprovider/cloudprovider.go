@@ -45,6 +45,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	cloudproviderevents "github.com/aws/karpenter-provider-aws/pkg/cloudprovider/events"
@@ -78,6 +79,7 @@ type CloudProvider struct {
 	nvidiaDRAProvider           nvidiadra.Provider
 	efaDRAProvider              efadra.Provider
 	rootVolumeProvider          rootvolume.Provider
+	clk                         clock.Clock
 	legacyRepairPolicies        bool
 	rebootForRepair             bool
 	caBundle                    *string
@@ -111,6 +113,7 @@ func New(
 		efaDRAProvider:              efadra.NewDefaultProvider(),
 		caBundle:                    caBundle,
 		rootVolumeProvider:          rootVolumeProvider,
+		clk:                         clock.RealClock{},
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -126,6 +129,11 @@ type Option func(*CloudProvider)
 // conditions and timing as before.
 func WithLegacyRepairPolicies(enabled bool) Option {
 	return func(c *CloudProvider) { c.legacyRepairPolicies = enabled }
+}
+
+// WithClock sets the clock used to time in-place upgrade grace periods.
+func WithClock(clk clock.Clock) Option {
+	return func(c *CloudProvider) { c.clk = clk }
 }
 
 // WithRebootForRepair makes the reboot-clearable repair policies reboot the node in place instead of replacing it.

@@ -24,7 +24,8 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
-	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -40,6 +41,14 @@ const (
 	inPlaceUpgradeRequeue = time.Minute
 )
 
+// Messages for an Unknown result, naming the check that couldn't complete. They are fixed strings so a repeated
+// failure doesn't rewrite the status.
+const (
+	inPlaceUpgradeMessageImage       = "describing the AMI failed"
+	inPlaceUpgradeMessageImageAbsent = "the AMI could not be found"
+	inPlaceUpgradeMessageSnapshot    = "checking the root snapshot's permissions failed"
+)
+
 // SnapshotAPI is the EC2 call the snapshot check needs.
 type SnapshotAPI interface {
 	DescribeSnapshots(context.Context, *ec2.DescribeSnapshotsInput, ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
@@ -49,6 +58,7 @@ type SnapshotAPI interface {
 // right after the AMI reconciler and never fails the EC2NodeClass reconcile: a check that can't complete marks the
 // AMI with reason Unknown, which holds AMI drift on that AMI instead of replacing nodes.
 type InPlaceUpgrade struct {
+	clk           clock.Clock
 	amiProvider   amifamily.Provider
 	snapshotAPI   SnapshotAPI
 	snapshotCache *cache.Cache
@@ -56,8 +66,9 @@ type InPlaceUpgrade struct {
 
 // NewInPlaceUpgradeReconciler builds the reconciler. snapshotAPI may be nil, in which case every private AMI is
 // reported Unknown.
-func NewInPlaceUpgradeReconciler(amiProvider amifamily.Provider, snapshotAPI SnapshotAPI) *InPlaceUpgrade {
+func NewInPlaceUpgradeReconciler(clk clock.Clock, amiProvider amifamily.Provider, snapshotAPI SnapshotAPI) *InPlaceUpgrade {
 	return &InPlaceUpgrade{
+		clk:           clk,
 		amiProvider:   amiProvider,
 		snapshotAPI:   snapshotAPI,
 		snapshotCache: cache.New(snapshotReadableTTL, time.Minute),
@@ -77,6 +88,9 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 	}
 	results := map[string]*v1.InPlaceUpgrade{}
 	unsupported := func(id, reason string) { results[id] = &v1.InPlaceUpgrade{Supported: false, Reason: reason} }
+	unknown := func(id, message string) {
+		results[id] = &v1.InPlaceUpgrade{Supported: false, Reason: v1.InPlaceUpgradeReasonUnknown, Message: message}
+	}
 	ids := lo.Uniq(lo.Map(nodeClass.Status.AMIs, func(ami v1.AMI, _ int) string { return ami.ID }))
 
 	switch family := nodeClass.AMIFamily(); family {
@@ -89,17 +103,18 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 	}
 
 	var requeue bool
+	imageMessage := inPlaceUpgradeMessageImageAbsent
 	images, err := u.amiProvider.Images(ctx, ids...)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed checking amis for in-place upgrade")
-		images, requeue = map[string]*amifamily.Image{}, true
+		images, requeue, imageMessage = map[string]*amifamily.Image{}, true, inPlaceUpgradeMessageImage
 	}
 	needSnapshot := map[string]string{}
 	for _, id := range ids {
 		image, ok := images[id]
 		switch {
 		case !ok:
-			unsupported(id, v1.InPlaceUpgradeReasonUnknown)
+			unknown(id, imageMessage)
 			requeue = true
 		case image.Platform == ec2types.PlatformValuesWindows:
 			unsupported(id, v1.InPlaceUpgradeReasonUnsupportedAMIFamily)
@@ -126,7 +141,7 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 		for id, snapshotID := range needSnapshot {
 			switch r, ok := readable[snapshotID]; {
 			case !ok:
-				unsupported(id, v1.InPlaceUpgradeReasonUnknown)
+				unknown(id, inPlaceUpgradeMessageSnapshot)
 			case !r:
 				unsupported(id, v1.InPlaceUpgradeReasonSnapshotNotReadable)
 			default:
@@ -143,10 +158,15 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 
 func (u *InPlaceUpgrade) apply(nodeClass *v1.EC2NodeClass, results map[string]*v1.InPlaceUpgrade) {
 	for i := range nodeClass.Status.AMIs {
-		result := results[nodeClass.Status.AMIs[i].ID]
-		// Only write when the value changes, so an unchanged result never produces a status patch.
-		if !equality.Semantic.DeepEqual(nodeClass.Status.AMIs[i].InPlaceUpgrade, result) {
-			nodeClass.Status.AMIs[i].InPlaceUpgrade = result.DeepCopy()
+		current, result := nodeClass.Status.AMIs[i].InPlaceUpgrade, results[nodeClass.Status.AMIs[i].ID]
+		// Only write when the value changes, so an unchanged result never produces a status patch and keeps the time
+		// it was first reported.
+		if result == nil || current == nil || current.Supported != result.Supported || current.Reason != result.Reason || current.Message != result.Message {
+			if result != nil {
+				result = result.DeepCopy()
+				result.LastTransitionTime = lo.ToPtr(metav1.NewTime(u.clk.Now()))
+			}
+			nodeClass.Status.AMIs[i].InPlaceUpgrade = result
 		}
 	}
 }

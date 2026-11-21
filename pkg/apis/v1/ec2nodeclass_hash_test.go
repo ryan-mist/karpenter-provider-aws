@@ -15,6 +15,8 @@ limitations under the License.
 package v1_test
 
 import (
+	"time"
+
 	"dario.cat/mergo"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
@@ -139,6 +141,8 @@ var _ = Describe("Hash", func() {
 		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Supported: true}
 		Expect(hash()).To(Equal(base))
 		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Supported: false, Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}
+		Expect(hash()).To(Equal(base))
+		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "describing the AMI failed", LastTransitionTime: &metav1.Time{Time: time.Now()}}
 		Expect(hash()).To(Equal(base))
 		// Sanity check that the hash still sees the fields it should.
 		amis[0].ID = "ami-2"

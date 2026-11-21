@@ -98,7 +98,8 @@ const (
 	// InPlaceUpgradeReasonSnapshotNotReadable is set when the account can't create a volume from the AMI's root
 	// snapshot, or the AMI has no EBS root snapshot.
 	InPlaceUpgradeReasonSnapshotNotReadable = "SnapshotNotReadable"
-	// InPlaceUpgradeReasonUnknown is set when a check couldn't be completed. Nodes wait instead of being replaced.
+	// InPlaceUpgradeReasonUnknown is set when a check couldn't be completed. Nodes wait for a grace period instead of
+	// being replaced right away.
 	InPlaceUpgradeReasonUnknown = "Unknown"
 )
 
@@ -110,6 +111,13 @@ type InPlaceUpgrade struct {
 	// Reason names the check that failed when Supported is false.
 	// +optional
 	Reason string `json:"reason,omitempty"`
+	// Message says which check couldn't complete when Reason is Unknown.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// LastTransitionTime is when Supported, Reason or Message last changed. Nodes wait on an Unknown result only for
+	// a grace period measured from this time, then are replaced.
+	// +optional
+	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
 }
 
 type CapacityReservation struct {

@@ -32,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	clock "k8s.io/utils/clock/testing"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	corecloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -72,6 +73,8 @@ var _ = Describe("In-place AMI drift", func() {
 	var fakeRecorder *record.FakeRecorder
 	var rootVolumes *fake.RootVolumeProvider
 	var provider *cloudprovider.CloudProvider
+	var clk *clock.FakeClock
+	var newProvider func() *cloudprovider.CloudProvider
 	var sg, subnet string
 
 	standardReqs := []corev1.NodeSelectorRequirement{
@@ -145,6 +148,25 @@ var _ = Describe("In-place AMI drift", func() {
 		GinkgoHelper()
 		Expect(driftStatus()).To(Equal(corecloudprovider.DriftStatus{Action: corecloudprovider.RebootNode, Reason: cloudprovider.AMIDrift}))
 	}
+	newProvider = func() *cloudprovider.CloudProvider {
+		return cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, events.NewRecorder(fakeRecorder), env.Client,
+			awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider,
+			awsEnv.InstanceTypeStore, testCABundle, rootVolumes, cloudprovider.WithClock(clk))
+	}
+	unknownSince := func(t time.Time) *v1.InPlaceUpgrade {
+		return &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "checking the root snapshot's permissions failed", LastTransitionTime: lo.ToPtr(metav1.NewTime(t))}
+	}
+	drainEvents := func() []string {
+		var out []string
+		for {
+			select {
+			case e := <-fakeRecorder.Events:
+				out = append(out, e)
+			default:
+				return out
+			}
+		}
+	}
 	setRebooting := func(reason string, status metav1.ConditionStatus) {
 		if status == metav1.ConditionTrue {
 			nodeClaim.StatusConditions().SetTrueWithReason(karpv1.ConditionTypeRebooting, reason, reason)
@@ -168,9 +190,8 @@ var _ = Describe("In-place AMI drift", func() {
 		sg, subnet = fake.SecurityGroupID(), fake.SubnetID()
 		fakeRecorder = record.NewFakeRecorder(100)
 		rootVolumes = fake.NewRootVolumeProvider()
-		provider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, events.NewRecorder(fakeRecorder), env.Client,
-			awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider,
-			awsEnv.InstanceTypeStore, testCABundle, rootVolumes)
+		clk = clock.NewFakeClock(time.Now())
+		provider = newProvider()
 
 		nodeClass = test.EC2NodeClass(v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{AMIDriftPolicy: v1.AMIDriftPolicyReplaceRootVolume}})
 		nodeClass.Status = v1.EC2NodeClassStatus{
@@ -359,12 +380,56 @@ var _ = Describe("In-place AMI drift", func() {
 				_, err := provider.GetDriftStatus(ctx, nodeClaim)
 				Expect(err).To(HaveOccurred())
 			})
-			It("should wait while the target AMI's checks couldn't complete", func() {
-				target(newStandardAMI).InPlaceUpgrade = &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}
-				apply()
-				_, err := provider.GetDriftStatus(ctx, nodeClaim)
-				Expect(err).To(HaveOccurred())
-				Expect(fakeRecorder.Events).ToNot(Receive())
+			Context("Unknown", func() {
+				It("should wait within the grace period", func() {
+					target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-cloudprovider.InPlaceUpgradeUnknownGracePeriod + time.Minute))
+					apply()
+					_, err := provider.GetDriftStatus(ctx, nodeClaim)
+					Expect(err).To(HaveOccurred())
+					Expect(drainEvents()).To(BeEmpty())
+				})
+				It("should replace past the grace period and say which check couldn't complete", func() {
+					target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-cloudprovider.InPlaceUpgradeUnknownGracePeriod - time.Second))
+					apply()
+					Expect(driftStatus()).To(Equal(corecloudprovider.DriftStatus{Action: corecloudprovider.ReplaceNode, Reason: cloudprovider.AMIDrift}))
+					evts := drainEvents()
+					Expect(evts).To(ContainElement(And(ContainSubstring("Normal InPlaceUpgradeFallback"), ContainSubstring(cloudprovider.InPlaceGateChecksIncomplete))))
+					Expect(evts).To(ContainElement(And(ContainSubstring("Warning InPlaceUpgradeIncomplete"), ContainSubstring(newStandardAMI), ContainSubstring("root snapshot"))))
+					// Both events are deduped.
+					driftStatus()
+					Expect(drainEvents()).To(BeEmpty())
+				})
+				It("should start replacing once the grace period runs out", func() {
+					target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now())
+					apply()
+					_, err := provider.GetDriftStatus(ctx, nodeClaim)
+					Expect(err).To(HaveOccurred())
+					clk.Step(cloudprovider.InPlaceUpgradeUnknownGracePeriod)
+					Expect(driftStatus().Action).To(Equal(corecloudprovider.ReplaceNode))
+				})
+				It("should measure the grace period from the persisted status across a controller restart", func() {
+					target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-10 * time.Minute))
+					apply()
+					_, err := provider.GetDriftStatus(ctx, nodeClaim)
+					Expect(err).To(HaveOccurred())
+					// A restarted controller starts with no in-memory state and reads the time from the EC2NodeClass.
+					clk.Step(6 * time.Minute)
+					provider = newProvider()
+					Expect(driftStatus().Action).To(Equal(corecloudprovider.ReplaceNode))
+				})
+				It("should treat an Unknown result without a time as past the grace period", func() {
+					target(newStandardAMI).InPlaceUpgrade = &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}
+					apply()
+					Expect(driftStatus().Action).To(Equal(corecloudprovider.ReplaceNode))
+				})
+				It("should go back to rebooting once a later evaluation succeeds", func() {
+					target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-time.Hour))
+					apply()
+					Expect(driftStatus().Action).To(Equal(corecloudprovider.ReplaceNode))
+					target(newStandardAMI).InPlaceUpgrade = &v1.InPlaceUpgrade{Supported: true, LastTransitionTime: lo.ToPtr(metav1.NewTime(clk.Now()))}
+					apply()
+					expectRebootNode()
+				})
 			})
 		})
 
@@ -588,6 +653,22 @@ var _ = Describe("In-place AMI drift", func() {
 			instance.SubnetId = aws.String(fake.SubnetID())
 			apply()
 			Expect(corecloudprovider.IsNodeRebootFailedError(provider.Reboot(ctx, nodeClaim, operationID))).To(BeTrue())
+			Expect(rootVolumes.CreateCalls).To(BeEmpty())
+		})
+		It("should retry while the target AMI's checks are Unknown within the grace period", func() {
+			target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now())
+			apply()
+			err := provider.Reboot(ctx, nodeClaim, operationID)
+			Expect(err).To(HaveOccurred())
+			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeFalse())
+			Expect(rootVolumes.CreateCalls).To(BeEmpty())
+		})
+		It("should fail the reboot when the target AMI's checks are Unknown past the grace period", func() {
+			target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-time.Hour))
+			apply()
+			err := provider.Reboot(ctx, nodeClaim, operationID)
+			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeTrue())
+			Expect(err.Error()).To(ContainSubstring(cloudprovider.InPlaceGateChecksIncomplete))
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
 		})
 		It("should retry while the target AMI's checks are pending", func() {

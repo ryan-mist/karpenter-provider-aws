@@ -17,7 +17,9 @@ package events
 import (
 	"fmt"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
@@ -81,5 +83,17 @@ func NodeClaimInPlaceUpgradeFallback(nodeClaim *karpv1.NodeClaim, gate string) e
 		Reason:         "InPlaceUpgradeFallback",
 		Message:        fmt.Sprintf("Replacing the node instead of its root volume, in-place check %s failed", gate),
 		DedupeValues:   []string{string(nodeClaim.UID), gate},
+	}
+}
+
+// EC2NodeClassInPlaceUpgradeIncomplete is emitted when nodes on an EC2NodeClass are replaced because the in-place
+// checks for an AMI couldn't complete within the grace period. message names the check.
+func EC2NodeClassInPlaceUpgradeIncomplete(nodeClass client.Object, amiID, message string) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClass,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "InPlaceUpgradeIncomplete",
+		Message:        fmt.Sprintf("In-place upgrade checks for AMI %s couldn't complete (%s), replacing drifted nodes instead", amiID, lo.Ternary(message != "", message, "unknown check")),
+		DedupeValues:   []string{string(nodeClass.GetUID()), amiID, message},
 	}
 }

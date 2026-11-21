@@ -15,6 +15,8 @@ limitations under the License.
 package instancetype_test
 
 import (
+	"time"
+
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -72,6 +74,8 @@ var _ = Describe("InstanceType cache keys and status.amis[].inPlaceUpgrade", fun
 			{Supported: true},
 			{Supported: false, Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable},
 			{Supported: false, Reason: v1.InPlaceUpgradeReasonUnknown},
+			{Supported: false, Reason: v1.InPlaceUpgradeReasonUnknown, Message: "describing the AMI failed", LastTransitionTime: &metav1.Time{Time: time.Now()}},
+			{Supported: true, LastTransitionTime: &metav1.Time{Time: time.Now().Add(time.Hour)}},
 			nil,
 		} {
 			setInPlaceUpgrade(u)

@@ -66,7 +66,7 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		nodeClass = ExpectExists(ctx, env.Client, nodeClass)
 		ami, ok := lo.Find(nodeClass.Status.AMIs, func(a v1.AMI) bool { return a.ID == id })
 		Expect(ok).To(BeTrue(), "ami %s isn't in status.amis", id)
-		return ami.InPlaceUpgrade
+		return withoutTime(ami.InPlaceUpgrade)
 	}
 	newController := func(opts ...nodeclass.Option) *nodeclass.Controller {
 		return nodeclass.NewController(awsEnv.Clock, env.Client, cloudProvider, events.NewRecorder(&record.FakeRecorder{}), fake.DefaultRegion,
@@ -215,8 +215,8 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		nodeClass = ExpectExists(ctx, env.Client, nodeClass)
 		Expect(nodeClass.Status.AMIs).To(HaveLen(2))
 		Expect(nodeClass.StatusConditions().Get(v1.ConditionTypeAMIsReady).IsTrue()).To(BeTrue())
-		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}))
-		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}))
+		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "checking the root snapshot's permissions failed"}))
+		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "checking the root snapshot's permissions failed"}))
 	})
 	It("should report Unknown and keep discovering AMIs when the image attributes can't be described", func() {
 		ExpectApplied(ctx, env.Client, nodeClass)
@@ -228,12 +228,12 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		nodeClass = ExpectExists(ctx, env.Client, nodeClass)
 		Expect(nodeClass.Status.AMIs).To(HaveLen(2))
 		Expect(nodeClass.StatusConditions().Get(v1.ConditionTypeAMIsReady).IsTrue()).To(BeTrue())
-		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}))
+		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "describing the AMI failed"}))
 	})
 	It("should report Unknown for private AMIs when no snapshot API is configured", func() {
 		ExpectApplied(ctx, env.Client, nodeClass)
 		ExpectObjectReconciled(ctx, env.Client, newController(), nodeClass)
-		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown}))
+		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "checking the root snapshot's permissions failed"}))
 	})
 	It("should cache snapshot results across reconciles", func() {
 		ExpectApplied(ctx, env.Client, nodeClass)
@@ -262,7 +262,7 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		Expect(err).ToNot(HaveOccurred())
 		amd64, ok := lo.Find(nodeClass.Status.AMIs, func(a v1.AMI) bool { return a.ID == "ami-amd64" })
 		Expect(ok).To(BeTrue())
-		Expect(amd64.InPlaceUpgrade).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
+		Expect(withoutTime(amd64.InPlaceUpgrade)).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
 		arm64, ok := lo.Find(nodeClass.Status.AMIs, func(a v1.AMI) bool { return a.ID == "ami-arm64-new" })
 		Expect(ok).To(BeTrue())
 		Expect(arm64.InPlaceUpgrade).To(BeNil())
@@ -287,9 +287,72 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 			{ID: "ami-amd64", Requirements: []corev1.NodeSelectorRequirement{{Key: v1.LabelInstanceGPUCount, Operator: corev1.NodeSelectorOpExists}}},
 			{ID: "ami-amd64", Requirements: []corev1.NodeSelectorRequirement{{Key: v1.LabelInstanceAcceleratorCount, Operator: corev1.NodeSelectorOpExists}}},
 		}
-		_, err := nodeclass.NewInPlaceUpgradeReconciler(awsEnv.AMIProvider, snapshotAPI).Reconcile(ctx, nodeClass)
+		_, err := nodeclass.NewInPlaceUpgradeReconciler(awsEnv.Clock, awsEnv.AMIProvider, snapshotAPI).Reconcile(ctx, nodeClass)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(nodeClass.Status.AMIs[0].InPlaceUpgrade).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
-		Expect(nodeClass.Status.AMIs[1].InPlaceUpgrade).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
+		Expect(withoutTime(nodeClass.Status.AMIs[0].InPlaceUpgrade)).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
+		Expect(withoutTime(nodeClass.Status.AMIs[1].InPlaceUpgrade)).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
+	})
+
+	Context("LastTransitionTime", func() {
+		lastTransition := func(id string) time.Time {
+			GinkgoHelper()
+			nodeClass = ExpectExists(ctx, env.Client, nodeClass)
+			ami, ok := lo.Find(nodeClass.Status.AMIs, func(a v1.AMI) bool { return a.ID == id })
+			Expect(ok).To(BeTrue())
+			Expect(ami.InPlaceUpgrade).ToNot(BeNil())
+			Expect(ami.InPlaceUpgrade.LastTransitionTime).ToNot(BeNil())
+			return ami.InPlaceUpgrade.LastTransitionTime.Time
+		}
+		It("should record when the result was first reported", func() {
+			ExpectApplied(ctx, env.Client, nodeClass)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			Expect(lastTransition("ami-amd64")).To(BeTemporally("~", awsEnv.Clock.Now(), time.Second))
+		})
+		It("should keep the time while the result is unchanged, including across a controller restart", func() {
+			snapshotAPI.Error = fmt.Errorf("throttled")
+			ExpectApplied(ctx, env.Client, nodeClass)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			first := lastTransition("ami-amd64")
+			awsEnv.Clock.Step(10 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			Expect(lastTransition("ami-amd64")).To(BeTemporally("==", first))
+			// A new controller has no in-memory state; the time comes from the status.
+			awsEnv.Clock.Step(10 * time.Minute)
+			ExpectObjectReconciled(ctx, env.Client, newController(nodeclass.WithSnapshotAPI(snapshotAPI)), nodeClass)
+			Expect(lastTransition("ami-amd64")).To(BeTemporally("==", first))
+			Expect(inPlaceUpgrade("ami-amd64").Reason).To(Equal(v1.InPlaceUpgradeReasonUnknown))
+		})
+		It("should move the time when the result changes", func() {
+			snapshotAPI.Error = fmt.Errorf("throttled")
+			ExpectApplied(ctx, env.Client, nodeClass)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			first := lastTransition("ami-amd64")
+			awsEnv.Clock.Step(20 * time.Minute)
+			snapshotAPI.Error = nil
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
+			Expect(lastTransition("ami-amd64")).To(BeTemporally("~", first.Add(20*time.Minute), time.Second))
+		})
+		It("should keep the time across the AMI reconciler rebuilding status.amis", func() {
+			snapshotAPI.Error = fmt.Errorf("throttled")
+			ExpectApplied(ctx, env.Client, nodeClass)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			first := lastTransition("ami-amd64")
+			awsEnv.Clock.Step(5 * time.Minute)
+			awsEnv.AMICache.Flush()
+			_, err := nodeclass.NewAMIReconciler(awsEnv.Clock, awsEnv.AMIProvider).Reconcile(ctx, nodeClass)
+			Expect(err).ToNot(HaveOccurred())
+			ami, _ := lo.Find(nodeClass.Status.AMIs, func(a v1.AMI) bool { return a.ID == "ami-amd64" })
+			Expect(ami.InPlaceUpgrade.LastTransitionTime.Time).To(BeTemporally("==", first))
+		})
 	})
 })
+
+func withoutTime(u *v1.InPlaceUpgrade) *v1.InPlaceUpgrade {
+	if u == nil {
+		return nil
+	}
+	out := u.DeepCopy()
+	out.LastTransitionTime = nil
+	return out
+}

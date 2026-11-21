@@ -114,7 +114,7 @@ func NewController(
 		reconcilers: []reconcile.TypedReconciler[*v1.EC2NodeClass]{
 			NewAMIReconciler(clk, amiProvider),
 			// Must run right after the AMI reconciler, which rebuilds status.amis.
-			NewInPlaceUpgradeReconciler(amiProvider, o.snapshotAPI),
+			NewInPlaceUpgradeReconciler(clk, amiProvider, o.snapshotAPI),
 			NewCapacityReservationReconciler(clk, capacityReservationProvider),
 			NewPlacementGroupReconciler(clk, placementGroupProvider),
 			NewSubnetReconciler(clk, subnetProvider),

@@ -704,6 +704,15 @@ spec:
                           set when the EC2NodeClass's amiDriftPolicy is ReplaceRootVolume. It is excluded from hashing so that changes
                           to it don't invalidate caches keyed on the resolved AMIs.
                         properties:
+                          lastTransitionTime:
+                            description: |-
+                              LastTransitionTime is when Supported, Reason or Message last changed. Nodes wait on an Unknown result only for
+                              a grace period measured from this time, then are replaced.
+                            format: date-time
+                            type: string
+                          message:
+                            description: Message says which check couldn't complete when Reason is Unknown.
+                            type: string
                           reason:
                             description: Reason names the check that failed when Supported is false.
                             type: string
