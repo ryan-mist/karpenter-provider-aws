@@ -76,6 +76,8 @@ type EC2Behavior struct {
 	Subnets                               sync.Map
 	LaunchTemplates                       sync.Map
 	launchTemplatesToCapacityReservations sync.Map // map[lt-name]cr-id
+
+	ReplaceRootVolumeTaskBehavior
 }
 
 type EC2API struct {
@@ -130,6 +132,7 @@ func (e *EC2API) Reset() {
 		return true
 	})
 	e.RunInstancesBehavior.Reset()
+	e.resetReplaceRootVolumeTasks()
 }
 
 // nolint: gocyclo

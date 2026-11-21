@@ -23,7 +23,7 @@ import (
 
 // TokenTagKey tags every replace root volume task Karpenter creates with the SHA-256 of its operationID. EC2 does
 // not return a task's client token, so the tag is how Karpenter recognizes its own tasks.
-const TokenTagKey = "karpenter.k8s.aws/replace-root-volume-token"
+const TokenTagKey = "karpenter.k8s.aws/replace-root-volume-token" //nolint:gosec // a tag key, not a credential
 
 // Task is a replace root volume task on an instance.
 type Task struct {

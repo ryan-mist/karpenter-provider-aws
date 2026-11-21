@@ -41,6 +41,8 @@ cat << EOF > controller-policy.json
                 "ec2:CreateLaunchTemplate",
                 "ec2:CreateFleet",
                 "ec2:DescribeSpotPriceHistory",
+                "ec2:DescribeReplaceRootVolumeTasks",
+                "ec2:DescribeSnapshots",
                 "pricing:GetProducts"
             ],
             "Effect": "Allow",
@@ -60,6 +62,28 @@ cat << EOF > controller-policy.json
             "Effect": "Allow",
             "Resource": "*",
             "Sid": "ConditionalEC2Termination"
+        },
+        {
+            "Action": "ec2:CreateReplaceRootVolumeTask",
+            "Condition": {
+                "StringLike": {
+                    "ec2:ResourceTag/karpenter.sh/nodepool": "*"
+                }
+            },
+            "Effect": "Allow",
+            "Resource": "arn:${AWS_PARTITION}:ec2:*:${AWS_ACCOUNT_ID}:instance/*",
+            "Sid": "ConditionalEC2RootVolumeReplacement"
+        },
+        {
+            "Action": "ec2:CreateReplaceRootVolumeTask",
+            "Effect": "Allow",
+            "Resource": [
+                "arn:${AWS_PARTITION}:ec2:*::image/*",
+                "arn:${AWS_PARTITION}:ec2:*::snapshot/*",
+                "arn:${AWS_PARTITION}:ec2:*:${AWS_ACCOUNT_ID}:volume/*",
+                "arn:${AWS_PARTITION}:ec2:*:${AWS_ACCOUNT_ID}:replace-root-volume-task/*"
+            ],
+            "Sid": "EC2RootVolumeReplacementResources"
         },
         {
             "Effect": "Allow",
