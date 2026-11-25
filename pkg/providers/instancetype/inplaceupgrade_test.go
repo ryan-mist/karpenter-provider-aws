@@ -116,7 +116,7 @@ var _ = Describe("InstanceType cache keys and status.amis[].inPlaceUpgrade", fun
 		Expect(keys).To(HaveLen(1))
 		setInPlaceUpgrade(&v1.InPlaceUpgrade{Supported: true})
 		Expect(discoveredKeys()).To(ConsistOf(keys))
-		setInPlaceUpgrade(&v1.InPlaceUpgrade{Supported: false, Reason: v1.InPlaceUpgradeReasonNitroTPM})
+		setInPlaceUpgrade(&v1.InPlaceUpgrade{Supported: false, Reason: v1.InPlaceUpgradeReasonProductCodes})
 		Expect(discoveredKeys()).To(ConsistOf(keys))
 		nodeClass.Spec.AMIDriftPolicy = v1.AMIDriftPolicyReplaceInstance
 		Expect(discoveredKeys()).To(ConsistOf(keys))

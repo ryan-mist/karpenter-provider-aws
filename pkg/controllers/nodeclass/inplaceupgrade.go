@@ -120,8 +120,6 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 			unsupported(id, v1.InPlaceUpgradeReasonUnsupportedAMIFamily)
 		case len(image.ProductCodes) > 0:
 			unsupported(id, v1.InPlaceUpgradeReasonProductCodes)
-		case image.TpmSupport == ec2types.TpmSupportValuesV20:
-			unsupported(id, v1.InPlaceUpgradeReasonNitroTPM)
 		case image.RootSnapshotID == "":
 			unsupported(id, v1.InPlaceUpgradeReasonSnapshotNotReadable)
 		case image.Public:

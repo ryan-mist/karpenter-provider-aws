@@ -257,8 +257,6 @@ func (c *CloudProvider) inPlaceNodeGate(ctx context.Context, nodeClaim *karpv1.N
 		return InPlaceGateBareMetal, nil
 	case len(inst.ProductCodes) > 0:
 		return InPlaceGateInstanceProductCodes, nil
-	case inst.TpmSupport != "":
-		return InPlaceGateInstanceNitroTPM, nil
 	}
 	images, err := c.amiProvider.Images(ctx, target.ID, currentImageID)
 	if err != nil {
@@ -275,6 +273,10 @@ func (c *CloudProvider) inPlaceNodeGate(ctx context.Context, nodeClaim *karpv1.N
 	case (targetImage.BootMode == ec2types.BootModeValuesUefi || targetImage.BootMode == ec2types.BootModeValuesLegacyBios) &&
 		string(targetImage.BootMode) != string(inst.BootMode):
 		return InPlaceGateBootMode, nil
+	// EC2 refuses to replace the root volume of a NitroTPM instance from an AMI without NitroTPM. Every other
+	// combination is allowed.
+	case inst.TpmSupport != "" && targetImage.TpmSupport != ec2types.TpmSupportValuesV20:
+		return InPlaceGateInstanceNitroTPM, nil
 	case inst.EnaSupport && !targetImage.EnaSupport:
 		return InPlaceGateENA, nil
 	case inst.SriovNetSupport == sriovNetSupportSimple && targetImage.SriovNetSupport != sriovNetSupportSimple:

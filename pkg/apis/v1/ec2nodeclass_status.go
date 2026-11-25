@@ -92,9 +92,6 @@ const (
 	InPlaceUpgradeReasonUnsupportedAMIFamily = "UnsupportedAMIFamily"
 	// InPlaceUpgradeReasonProductCodes is set when the AMI carries Marketplace product codes.
 	InPlaceUpgradeReasonProductCodes = "ProductCodes"
-	// InPlaceUpgradeReasonNitroTPM is set when the AMI enables NitroTPM. Replacing the root volume resets the
-	// instance's NitroTPM keys, which breaks anything sealed to them, such as an encrypted Bottlerocket data volume.
-	InPlaceUpgradeReasonNitroTPM = "NitroTPM"
 	// InPlaceUpgradeReasonSnapshotNotReadable is set when the account can't create a volume from the AMI's root
 	// snapshot, or the AMI has no EBS root snapshot.
 	InPlaceUpgradeReasonSnapshotNotReadable = "SnapshotNotReadable"

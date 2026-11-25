@@ -180,12 +180,12 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonProductCodes}))
 		Expect(inPlaceUpgrade("ami-arm64").Supported).To(BeTrue())
 	})
-	It("should mark NitroTPM AMIs as NitroTPM", func() {
+	It("should leave NitroTPM AMIs supported, since the NitroTPM rule depends on the instance", func() {
 		arm64Image.TpmSupport = ec2types.TpmSupportValuesV20
 		setImages(amd64Image, arm64Image)
 		ExpectApplied(ctx, env.Client, nodeClass)
 		ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
-		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonNitroTPM}))
+		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
 		Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
 	})
 	It("should mark Windows platform AMIs as UnsupportedAMIFamily", func() {

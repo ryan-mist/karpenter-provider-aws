@@ -371,7 +371,6 @@ var _ = Describe("In-place AMI drift", func() {
 				},
 				Entry("product codes", v1.InPlaceUpgradeReasonProductCodes),
 				Entry("snapshot", v1.InPlaceUpgradeReasonSnapshotNotReadable),
-				Entry("NitroTPM", v1.InPlaceUpgradeReasonNitroTPM),
 				Entry("family", v1.InPlaceUpgradeReasonUnsupportedAMIFamily),
 			)
 			It("should wait while the target AMI hasn't been checked", func() {
@@ -449,11 +448,26 @@ var _ = Describe("In-place AMI drift", func() {
 				apply()
 				expectFallback(cloudprovider.InPlaceGateInstanceProductCodes)
 			})
-			It("should replace instances with NitroTPM enabled", func() {
-				instance.TpmSupport = aws.String("v2.0")
-				apply()
-				expectFallback(cloudprovider.InPlaceGateInstanceNitroTPM)
-			})
+			DescribeTable("should follow EC2's NitroTPM rule",
+				func(instanceTPM bool, amiTPM bool, allowed bool) {
+					if instanceTPM {
+						instance.TpmSupport = aws.String("v2.0")
+					}
+					if amiTPM {
+						images[newStandardAMI].TpmSupport = ec2types.TpmSupportValuesV20
+					}
+					apply()
+					if allowed {
+						expectRebootNode()
+					} else {
+						expectFallback(cloudprovider.InPlaceGateInstanceNitroTPM)
+					}
+				},
+				Entry("NitroTPM instance to a NitroTPM AMI", true, true, true),
+				Entry("NitroTPM instance to an AMI without NitroTPM", true, false, false),
+				Entry("instance without NitroTPM to a NitroTPM AMI", false, true, true),
+				Entry("neither uses NitroTPM", false, false, true),
+			)
 			It("should replace when the target AMI requires a different boot mode", func() {
 				images[newStandardAMI].BootMode = ec2types.BootModeValuesUefi
 				apply()

@@ -67,6 +67,9 @@ spec:
                     ReplaceRootVolume replaces the instance's root volume from the new AMI in place, keeping instance store and
                     data volumes, when AMI drift is the only drift and every in-place safety check passes. Otherwise the node is
                     replaced. The field is excluded from the drift hash so changing it never drifts nodes on its own.
+                    Replacing the root volume resets the instance's NitroTPM state and generates new keys, so anything sealed to the
+                    TPM is lost. For example, a Bottlerocket node that encrypts its data volume with TPM-backed storage encryption
+                    can't unlock that volume after the swap.
                   enum:
                     - ReplaceInstance
                     - ReplaceRootVolume
