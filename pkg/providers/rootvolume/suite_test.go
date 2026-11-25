@@ -105,6 +105,43 @@ var _ = Describe("Token", func() {
 	})
 })
 
+var _ = Describe("DryRun", func() {
+	It("should ask with the same parameters as Create and return nil on DryRunOperation", func() {
+		Expect(provider.DryRun(ctx, "i-dryrun", "ami-target")).To(Succeed())
+		Expect(provider.Create(ctx, "i-real", "ami-target", rootvolume.Token("op"))).ToNot(BeNil())
+		inputs := []*ec2.CreateReplaceRootVolumeTaskInput{}
+		fakeEC2API.CreateReplaceRootVolumeTaskBehavior.CalledWithInput.ForEach(func(i *ec2.CreateReplaceRootVolumeTaskInput) { inputs = append(inputs, i) })
+		Expect(inputs).To(HaveLen(2))
+		dryRun, real := inputs[0], inputs[1]
+		Expect(aws.ToBool(dryRun.DryRun)).To(BeTrue())
+		Expect(aws.ToString(dryRun.ImageId)).To(Equal(aws.ToString(real.ImageId)))
+		Expect(dryRun.DeleteReplacedRootVolume).To(Equal(real.DeleteReplacedRootVolume))
+		Expect(dryRun.ClientToken).To(BeNil())
+		Expect(dryRun.TagSpecifications).To(HaveLen(1))
+		Expect(dryRun.TagSpecifications[0].ResourceType).To(Equal(real.TagSpecifications[0].ResourceType))
+		Expect(lo.Map(dryRun.TagSpecifications[0].Tags, func(t ec2types.Tag, _ int) string { return aws.ToString(t.Key) })).
+			To(Equal(lo.Map(real.TagSpecifications[0].Tags, func(t ec2types.Tag, _ int) string { return aws.ToString(t.Key) })))
+		// No task is created by the dry run.
+		Expect(provider.Latest(ctx, "i-dryrun")).To(BeNil())
+	})
+	It("should return UnauthorizedOperation when the role is missing a permission", func() {
+		fakeEC2API.DenyReplaceRootVolumeTask("ec2:CreateTags")
+		err := provider.DryRun(ctx, "i-dryrun", "ami-target")
+		Expect(err).To(HaveOccurred())
+		apiErr, ok := lo.ErrorsAs[smithy.APIError](err)
+		Expect(ok).To(BeTrue())
+		Expect(apiErr.ErrorCode()).To(Equal("UnauthorizedOperation"))
+		Expect(apiErr.ErrorMessage()).To(ContainSubstring("ec2:CreateTags"))
+	})
+	It("should return other errors as they are", func() {
+		fakeEC2API.CreateReplaceRootVolumeTaskBehavior.Error.Set(&smithy.GenericAPIError{Code: "RequestLimitExceeded"})
+		err := provider.DryRun(ctx, "i-dryrun", "ami-target")
+		apiErr, ok := lo.ErrorsAs[smithy.APIError](err)
+		Expect(ok).To(BeTrue())
+		Expect(apiErr.ErrorCode()).To(Equal("RequestLimitExceeded"))
+	})
+})
+
 var _ = Describe("Create", func() {
 	var instanceID, imageID, token string
 	BeforeEach(func() {

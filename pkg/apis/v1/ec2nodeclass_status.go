@@ -95,6 +95,9 @@ const (
 	// InPlaceUpgradeReasonSnapshotNotReadable is set when the account can't create a volume from the AMI's root
 	// snapshot, or the AMI has no EBS root snapshot.
 	InPlaceUpgradeReasonSnapshotNotReadable = "SnapshotNotReadable"
+	// InPlaceUpgradeReasonPermissionDenied is set when a DryRun CreateReplaceRootVolumeTask toward the AMI, with the
+	// same parameters as the real call, fails with UnauthorizedOperation. The message names the denied action.
+	InPlaceUpgradeReasonPermissionDenied = "PermissionDenied"
 	// InPlaceUpgradeReasonUnknown is set when a check couldn't be completed. Nodes wait for a grace period instead of
 	// being replaced right away.
 	InPlaceUpgradeReasonUnknown = "Unknown"

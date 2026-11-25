@@ -372,6 +372,7 @@ var _ = Describe("In-place AMI drift", func() {
 				Entry("product codes", v1.InPlaceUpgradeReasonProductCodes),
 				Entry("snapshot", v1.InPlaceUpgradeReasonSnapshotNotReadable),
 				Entry("family", v1.InPlaceUpgradeReasonUnsupportedAMIFamily),
+				Entry("permission dry run", v1.InPlaceUpgradeReasonPermissionDenied),
 			)
 			It("should wait while the target AMI hasn't been checked", func() {
 				target(newStandardAMI).InPlaceUpgrade = nil

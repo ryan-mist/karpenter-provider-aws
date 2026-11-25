@@ -293,7 +293,7 @@ The AllowScopedDeletion Sid allows [TerminateInstances](https://docs.aws.amazon.
 
 #### AllowScopedRootVolumeReplacement
 
-The AllowScopedRootVolumeReplacement Sid allows [CreateReplaceRootVolumeTask](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateReplaceRootVolumeTask.html) on instances that carry the same `kubernetes.io/cluster/${ClusterName}` and `karpenter.sh/nodepool` tags as AllowScopedDeletion, so Karpenter can only replace the root volume of instances it manages. Karpenter uses it to resolve AMI drift in place by replacing a node's root volume from the new AMI.
+The AllowScopedRootVolumeReplacement Sid allows [CreateReplaceRootVolumeTask](https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateReplaceRootVolumeTask.html) on instances that carry the same `kubernetes.io/cluster/${ClusterName}` and `karpenter.sh/nodepool` tags as AllowScopedDeletion, so Karpenter can only replace the root volume of instances it manages. Karpenter uses it to resolve AMI drift in place by replacing a node's root volume from the new AMI. Before draining a node for this, Karpenter makes the same call with `DryRun` set against one of the EC2NodeClass's running instances. If that dry run is denied, the AMI is reported in `status.amis[].inPlaceUpgrade` with reason `PermissionDenied` and a message naming the denied action, and drifted nodes are replaced instead.
 
 ```json
 {

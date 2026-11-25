@@ -43,6 +43,17 @@ type ReplaceRootVolumeTaskBehavior struct {
 	replaceRootVolumeTasks map[string]ec2types.ReplaceRootVolumeTask
 	// replaceRootVolumeTaskTokens maps a client token to the task it created
 	replaceRootVolumeTaskTokens map[string]string
+	// replaceRootVolumeTaskDeniedAction, when set, is the action the caller's role is missing
+	replaceRootVolumeTaskDeniedAction string
+}
+
+// DenyReplaceRootVolumeTask makes CreateReplaceRootVolumeTask, dry run or not, fail with UnauthorizedOperation naming
+// action, as EC2 does when the role lacks ec2:CreateReplaceRootVolumeTask or ec2:CreateTags for the task's tags. An
+// empty action allows the call again.
+func (b *ReplaceRootVolumeTaskBehavior) DenyReplaceRootVolumeTask(action string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.replaceRootVolumeTaskDeniedAction = action
 }
 
 func (b *ReplaceRootVolumeTaskBehavior) resetReplaceRootVolumeTasks() {
@@ -52,6 +63,7 @@ func (b *ReplaceRootVolumeTaskBehavior) resetReplaceRootVolumeTasks() {
 	defer b.mu.Unlock()
 	b.replaceRootVolumeTasks = nil
 	b.replaceRootVolumeTaskTokens = nil
+	b.replaceRootVolumeTaskDeniedAction = ""
 }
 
 // ReplaceRootVolumeTaskID returns a random task ID in the EC2 format.
@@ -109,6 +121,20 @@ func (e *EC2API) CreateReplaceRootVolumeTask(_ context.Context, input *ec2.Creat
 		}
 		if b.replaceRootVolumeTaskTokens == nil {
 			b.replaceRootVolumeTaskTokens = map[string]string{}
+		}
+		if action := b.replaceRootVolumeTaskDeniedAction; action != "" {
+			return nil, &smithy.GenericAPIError{
+				Code: "UnauthorizedOperation",
+				Message: fmt.Sprintf("You are not authorized to perform this operation. User: arn:aws:sts::123456789012:assumed-role/KarpenterControllerRole/karpenter "+
+					"is not authorized to perform: %s on resource: arn:aws:ec2:%s:123456789012:instance/%s because no identity-based policy allows the %s action. "+
+					"Encoded authorization failure message: abc123", action, DefaultRegion, aws.ToString(input.InstanceId), action),
+			}
+		}
+		if lo.FromPtr(input.DryRun) {
+			return nil, &smithy.GenericAPIError{
+				Code:    "DryRunOperation",
+				Message: "Request would have succeeded, but DryRun flag is set.",
+			}
 		}
 		if token := aws.ToString(input.ClientToken); token != "" {
 			if id, ok := b.replaceRootVolumeTaskTokens[token]; ok {

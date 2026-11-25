@@ -106,7 +106,7 @@ func NewControllers(
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclasshash.NewController(kubeClient, caBundle),
-		nodeclass.NewController(clk, kubeClient, cloudProvider, recorder, cfg.Region, subnetProvider, securityGroupProvider, amiProvider, instanceProfileProvider, instanceTypeProvider, launchTemplateProvider, capacityReservationProvider, placementGroupProvider, ec2api, validationCache, recreationCache, amiResolver, celEnv, options.FromContext(ctx).DisableDryRun, nodeClassOptions(ec2api)...),
+		nodeclass.NewController(clk, kubeClient, cloudProvider, recorder, cfg.Region, subnetProvider, securityGroupProvider, amiProvider, instanceProfileProvider, instanceTypeProvider, launchTemplateProvider, capacityReservationProvider, placementGroupProvider, ec2api, validationCache, recreationCache, amiResolver, celEnv, options.FromContext(ctx).DisableDryRun, nodeClassOptions(ec2api, rootVolumeProvider)...),
 		nodeclaimgarbagecollection.NewController(kubeClient, cloudProvider),
 		nodeclaimtagging.NewController(kubeClient, cloudProvider, instanceProvider),
 		nodeclaimrootvolume.NewController(kubeClient, cloudProvider, clk, rootVolumeProvider),
@@ -141,10 +141,13 @@ func NewControllers(
 
 // nodeClassOptions wires the in-place upgrade checks. The EC2 client implements DescribeSnapshots even though
 // sdk.EC2API doesn't declare it yet.
-func nodeClassOptions(ec2api sdk.EC2API) []nodeclass.Option {
+func nodeClassOptions(ec2api sdk.EC2API, rootVolumeProvider rootvolume.Provider) []nodeclass.Option {
 	var opts []nodeclass.Option
 	if snapshotAPI, ok := ec2api.(nodeclass.SnapshotAPI); ok {
 		opts = append(opts, nodeclass.WithSnapshotAPI(snapshotAPI))
+	}
+	if rootVolumeProvider != nil {
+		opts = append(opts, nodeclass.WithRootVolumeProvider(rootVolumeProvider))
 	}
 	return opts
 }

@@ -63,6 +63,9 @@ type Provider interface {
 	// Create replaces the instance's root volume from imageID for the operation identified by token. If a task tagged
 	// with token already exists on the instance, in any state, it is returned instead of creating another.
 	Create(ctx context.Context, instanceID, imageID, token string) (*Task, error)
+	// DryRun checks with a DryRun CreateReplaceRootVolumeTask, using the same parameters as Create, whether the caller
+	// may replace the instance's root volume from imageID. It returns nil when the call would be allowed.
+	DryRun(ctx context.Context, instanceID, imageID string) error
 	// Latest returns the most recent task Karpenter created on the instance, or nil if there is none. It reads the
 	// cache and describes the instance on a miss.
 	Latest(ctx context.Context, instanceID string) (*Task, error)

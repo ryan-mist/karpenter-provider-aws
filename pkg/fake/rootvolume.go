@@ -44,6 +44,10 @@ type RootVolumeProvider struct {
 	tasks map[string][]*rootvolume.Task
 
 	CreateCalls []CreateRootVolumeTaskInput
+	// DryRunCalls records calls to DryRun.
+	DryRunCalls []CreateRootVolumeTaskInput
+	// DryRunError, when set, is returned by DryRun. Otherwise the dry run is allowed.
+	DryRunError error
 	// CreateError, when set, is returned by Create instead of creating a task.
 	CreateError error
 	// LatestError, when set, is returned by Latest.
@@ -60,6 +64,8 @@ func (p *RootVolumeProvider) Reset() {
 	p.tasks = map[string][]*rootvolume.Task{}
 	p.CreateCalls = nil
 	p.CreateError = nil
+	p.DryRunCalls = nil
+	p.DryRunError = nil
 	p.LatestError = nil
 }
 
@@ -90,6 +96,13 @@ func (p *RootVolumeProvider) Create(_ context.Context, instanceID, imageID, toke
 	}
 	p.tasks[instanceID] = append(p.tasks[instanceID], task)
 	return task, nil
+}
+
+func (p *RootVolumeProvider) DryRun(_ context.Context, instanceID, imageID string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.DryRunCalls = append(p.DryRunCalls, CreateRootVolumeTaskInput{InstanceID: instanceID, ImageID: imageID})
+	return p.DryRunError
 }
 
 func (p *RootVolumeProvider) Latest(_ context.Context, instanceID string) (*rootvolume.Task, error) {

@@ -35,6 +35,7 @@ import (
 
 	sdk "github.com/aws/karpenter-provider-aws/pkg/aws"
 	"github.com/aws/karpenter-provider-aws/pkg/batcher"
+	awserrors "github.com/aws/karpenter-provider-aws/pkg/errors"
 )
 
 const (
@@ -48,6 +49,9 @@ const (
 
 	incorrectInstanceStateErrorCode = "IncorrectInstanceState"
 )
+
+// dryRunToken is the TokenTagKey value a dry run requests, so its tags have the same shape as a real create's.
+var dryRunToken = Token("dry-run")
 
 // Token returns the client token and TokenTagKey value for an operation. EC2 caps client tokens at 64 characters and
 // operation IDs are longer, so the token is the hex SHA-256 of the operation ID.
@@ -133,20 +137,7 @@ func (p *DefaultProvider) Create(ctx context.Context, instanceID, imageID, token
 	if task, ok := p.adopt(instanceID, tasks, token); ok {
 		return task, nil
 	}
-	out, err := p.ec2api.CreateReplaceRootVolumeTask(ctx, &ec2.CreateReplaceRootVolumeTaskInput{
-		InstanceId: aws.String(instanceID),
-		ImageId:    aws.String(imageID),
-		// EC2 keeps the old root volume as an available, billed volume unless asked to delete it.
-		DeleteReplacedRootVolume: aws.Bool(true),
-		ClientToken:              aws.String(token),
-		TagSpecifications: []ec2types.TagSpecification{{
-			ResourceType: ec2types.ResourceTypeReplaceRootVolumeTask,
-			Tags: []ec2types.Tag{
-				{Key: aws.String(TokenTagKey), Value: aws.String(token)},
-				{Key: aws.String(fmt.Sprintf("kubernetes.io/cluster/%s", p.clusterName)), Value: aws.String("owned")},
-			},
-		}},
-	})
+	out, err := p.ec2api.CreateReplaceRootVolumeTask(ctx, p.createInput(instanceID, imageID, token))
 	if err != nil {
 		if !isIncorrectInstanceState(err) {
 			return nil, fmt.Errorf("creating replace root volume task, %w", err)
@@ -176,6 +167,44 @@ func (p *DefaultProvider) Create(ctx context.Context, instanceID, imageID, token
 	log.FromContext(ctx).WithValues("instance-id", instanceID, "image-id", imageID, "task-id", task.ID).V(1).Info("created replace root volume task")
 	p.store(task)
 	return lo.ToPtr(task), nil
+}
+
+// DryRun asks EC2 whether the caller may replace the instance's root volume from imageID, with the same parameters
+// Create uses. It returns nil when EC2 answers DryRunOperation, and EC2's error otherwise, such as
+// UnauthorizedOperation when the role lacks a permission the real call needs.
+func (p *DefaultProvider) DryRun(ctx context.Context, instanceID, imageID string) error {
+	input := p.createInput(instanceID, imageID, dryRunToken)
+	// A dry run never creates a task, so it carries no client token that a later create could collide with.
+	input.ClientToken = nil
+	input.DryRun = aws.Bool(true)
+	_, err := p.ec2api.CreateReplaceRootVolumeTask(ctx, input)
+	switch {
+	case awserrors.IsDryRunError(err):
+		return nil
+	case err != nil:
+		return fmt.Errorf("dry run of replace root volume task, %w", err)
+	default:
+		return fmt.Errorf("dry run of replace root volume task, EC2 didn't answer DryRunOperation")
+	}
+}
+
+// createInput is the CreateReplaceRootVolumeTask request for a replacement, shared by Create and DryRun so the dry
+// run asks for exactly the permissions the real call needs.
+func (p *DefaultProvider) createInput(instanceID, imageID, token string) *ec2.CreateReplaceRootVolumeTaskInput {
+	return &ec2.CreateReplaceRootVolumeTaskInput{
+		InstanceId: aws.String(instanceID),
+		ImageId:    aws.String(imageID),
+		// EC2 keeps the old root volume as an available, billed volume unless asked to delete it.
+		DeleteReplacedRootVolume: aws.Bool(true),
+		ClientToken:              aws.String(token),
+		TagSpecifications: []ec2types.TagSpecification{{
+			ResourceType: ec2types.ResourceTypeReplaceRootVolumeTask,
+			Tags: []ec2types.Tag{
+				{Key: aws.String(TokenTagKey), Value: aws.String(token)},
+				{Key: aws.String(fmt.Sprintf("kubernetes.io/cluster/%s", p.clusterName)), Value: aws.String("owned")},
+			},
+		}},
+	}
 }
 
 func (p *DefaultProvider) Latest(ctx context.Context, instanceID string) (*Task, error) {
