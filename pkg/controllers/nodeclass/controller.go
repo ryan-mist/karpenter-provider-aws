@@ -61,6 +61,7 @@ import (
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instancetype"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/launchtemplate"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/placementgroup"
+	"github.com/aws/karpenter-provider-aws/pkg/providers/rootvolume"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/securitygroup"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/subnet"
 )
@@ -97,7 +98,12 @@ func NewController(
 	amiResolver amifamily.Resolver,
 	celEnv *kubeletcel.CELEnvironment,
 	disableDryRun bool,
+	opts ...Option,
 ) *Controller {
+	o := controllerOptions{}
+	for _, opt := range opts {
+		opt(&o)
+	}
 	validation := NewValidationReconciler(clk, kubeClient, cloudProvider, ec2api, amiResolver, instanceTypeProvider, launchTemplateProvider, validationCache, celEnv, disableDryRun)
 	return &Controller{
 		kubeClient:              kubeClient,
@@ -108,6 +114,8 @@ func NewController(
 		validation:              validation,
 		reconcilers: []reconcile.TypedReconciler[*v1.EC2NodeClass]{
 			NewAMIReconciler(clk, amiProvider),
+			// Must run right after the AMI reconciler, which rebuilds status.amis.
+			NewInPlaceUpgradeReconciler(clk, kubeClient, amiProvider, o.snapshotAPI, o.rootVolumeProvider),
 			NewCapacityReservationReconciler(clk, capacityReservationProvider),
 			NewPlacementGroupReconciler(clk, placementGroupProvider),
 			NewSubnetReconciler(clk, subnetProvider),
@@ -116,6 +124,26 @@ func NewController(
 			validation,
 		},
 	}
+}
+
+type controllerOptions struct {
+	snapshotAPI        SnapshotAPI
+	rootVolumeProvider rootvolume.Provider
+}
+
+// Option configures the EC2NodeClass controller.
+type Option func(*controllerOptions)
+
+// WithSnapshotAPI sets the EC2 client the in-place upgrade snapshot check uses. Without it, every AMI on a
+// ReplaceRootVolume EC2NodeClass is reported with reason Unknown.
+func WithSnapshotAPI(api SnapshotAPI) Option {
+	return func(o *controllerOptions) { o.snapshotAPI = api }
+}
+
+// WithRootVolumeProvider sets the provider the in-place upgrade permission dry run goes through. Without it, the dry
+// run is skipped.
+func WithRootVolumeProvider(provider rootvolume.Provider) Option {
+	return func(o *controllerOptions) { o.rootVolumeProvider = provider }
 }
 
 func (c *Controller) Name() string {

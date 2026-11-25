@@ -15,8 +15,12 @@ limitations under the License.
 package v1_test
 
 import (
+	"time"
+
 	"dario.cat/mergo"
+	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/karpenter/pkg/test"
@@ -115,7 +119,35 @@ var _ = Describe("Hash", func() {
 		Entry("Modified AMISelector", staticHash, v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{AMISelectorTerms: []v1.AMISelectorTerm{{Tags: map[string]string{"": "ami-test-value"}}}}}),
 		Entry("Modified SubnetSelector", staticHash, v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{SubnetSelectorTerms: []v1.SubnetSelectorTerm{{Tags: map[string]string{"subnet-test-key": "subnet-test-value"}}}}}),
 		Entry("Modified SecurityGroupSelector", staticHash, v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{SecurityGroupSelectorTerms: []v1.SecurityGroupSelectorTerm{{Tags: map[string]string{"security-group-test-key": "security-group-test-value"}}}}}),
+		Entry("AMIDriftPolicy ReplaceRootVolume", staticHash, v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{AMIDriftPolicy: v1.AMIDriftPolicyReplaceRootVolume}}),
+		Entry("AMIDriftPolicy ReplaceInstance", staticHash, v1.EC2NodeClass{Spec: v1.EC2NodeClassSpec{AMIDriftPolicy: v1.AMIDriftPolicyReplaceInstance}}),
 	)
+	It("should not change the hash or need a hash version bump when amiDriftPolicy is flipped", func() {
+		// The CRD defaults amiDriftPolicy, so existing EC2NodeClasses gain the field on upgrade. Because it's
+		// ignored, NodeClaims launched before the upgrade keep matching and no hash version bump is needed.
+		before := nodeClass.Hash(testCABundle)
+		for _, policy := range []v1.AMIDriftPolicy{v1.AMIDriftPolicyReplaceInstance, v1.AMIDriftPolicyReplaceRootVolume, ""} {
+			nodeClass.Spec.AMIDriftPolicy = policy
+			Expect(nodeClass.Hash(testCABundle)).To(Equal(before))
+		}
+		Expect(v1.EC2NodeClassHashVersion).To(Equal("v6"))
+	})
+	It("should not hash status.amis[].inPlaceUpgrade", func() {
+		amis := []v1.AMI{{ID: "ami-1", Name: "ami-1", Requirements: []corev1.NodeSelectorRequirement{{Key: corev1.LabelArchStable, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}}}}}
+		hash := func() uint64 {
+			return lo.Must(hashstructure.Hash(amis, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true}))
+		}
+		base := hash()
+		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Supported: true}
+		Expect(hash()).To(Equal(base))
+		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Supported: false, Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}
+		Expect(hash()).To(Equal(base))
+		amis[0].InPlaceUpgrade = &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "describing the AMI failed", LastTransitionTime: &metav1.Time{Time: time.Now()}}
+		Expect(hash()).To(Equal(base))
+		// Sanity check that the hash still sees the fields it should.
+		amis[0].ID = "ami-2"
+		Expect(hash()).ToNot(Equal(base))
+	})
 	// We create a separate test for updating blockDeviceMapping volumeSize, since resource.Quantity is a struct, and mergo.WithSliceDeepCopy
 	// doesn't work well with unexported fields, like the ones that are present in resource.Quantity
 	It("should match static hash when updating blockDeviceMapping volumeSize", func() {

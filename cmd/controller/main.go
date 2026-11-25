@@ -47,6 +47,7 @@ func main() {
 		op.PlacementGroupProvider,
 		op.InstanceTypeStore,
 		op.CABundle,
+		op.RootVolumeProvider,
 		cloudprovider.WithLegacyRepairPolicies(karpoptions.FromContext(ctx).LegacyNodeRepair),
 		cloudprovider.WithRebootForRepair(options.FromContext(ctx).FeatureGates.RebootForRepair),
 	)
@@ -101,6 +102,7 @@ func main() {
 			op.AMIResolver,
 			op.ZonalShiftProvider,
 			op.InstanceStatusProvider,
+			op.RootVolumeProvider,
 			op.CABundle,
 			op.CELEnvironment,
 		)...).

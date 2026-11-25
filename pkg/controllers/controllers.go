@@ -57,6 +57,7 @@ import (
 	kubeletcel "github.com/aws/karpenter-provider-aws/pkg/cel"
 	"github.com/aws/karpenter-provider-aws/pkg/controllers/interruption"
 	nodeclaimgarbagecollection "github.com/aws/karpenter-provider-aws/pkg/controllers/nodeclaim/garbagecollection"
+	nodeclaimrootvolume "github.com/aws/karpenter-provider-aws/pkg/controllers/nodeclaim/rootvolume"
 	nodeclaimtagging "github.com/aws/karpenter-provider-aws/pkg/controllers/nodeclaim/tagging"
 	nodeclassgarbagecollection "github.com/aws/karpenter-provider-aws/pkg/controllers/nodeclass/garbagecollection"
 	"github.com/aws/karpenter-provider-aws/pkg/operator/options"
@@ -66,6 +67,7 @@ import (
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instanceprofile"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/instancetype"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/pricing"
+	"github.com/aws/karpenter-provider-aws/pkg/providers/rootvolume"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/securitygroup"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/sqs"
 	"github.com/aws/karpenter-provider-aws/pkg/providers/subnet"
@@ -98,14 +100,16 @@ func NewControllers(
 	amiResolver amifamily.Resolver,
 	zonalshiftProvider arczonalshift.Provider,
 	instanceStatusProvider instancestatus.Provider,
+	rootVolumeProvider rootvolume.Provider,
 	caBundle *string,
 	celEnv *kubeletcel.CELEnvironment,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclasshash.NewController(kubeClient, caBundle),
-		nodeclass.NewController(clk, kubeClient, cloudProvider, recorder, cfg.Region, subnetProvider, securityGroupProvider, amiProvider, instanceProfileProvider, instanceTypeProvider, launchTemplateProvider, capacityReservationProvider, placementGroupProvider, ec2api, validationCache, recreationCache, amiResolver, celEnv, options.FromContext(ctx).DisableDryRun),
+		nodeclass.NewController(clk, kubeClient, cloudProvider, recorder, cfg.Region, subnetProvider, securityGroupProvider, amiProvider, instanceProfileProvider, instanceTypeProvider, launchTemplateProvider, capacityReservationProvider, placementGroupProvider, ec2api, validationCache, recreationCache, amiResolver, celEnv, options.FromContext(ctx).DisableDryRun, nodeClassOptions(ec2api, rootVolumeProvider)...),
 		nodeclaimgarbagecollection.NewController(kubeClient, cloudProvider),
 		nodeclaimtagging.NewController(kubeClient, cloudProvider, instanceProvider),
+		nodeclaimrootvolume.NewController(kubeClient, cloudProvider, clk, rootVolumeProvider),
 		controllerspricing.NewController(pricingProvider),
 		controllersinstancetype.NewController(instanceTypeProvider),
 		controllersinstancetypecapacity.NewController(kubeClient, cloudProvider, instanceTypeProvider),
@@ -133,4 +137,17 @@ func NewControllers(
 		controllers = append(controllers, interruption.NewController(kubeClient, clk, cloudProvider, recorder, prov, sqsAPI, unavailableOfferings))
 	}
 	return controllers
+}
+
+// nodeClassOptions wires the in-place upgrade checks. The EC2 client implements DescribeSnapshots even though
+// sdk.EC2API doesn't declare it yet.
+func nodeClassOptions(ec2api sdk.EC2API, rootVolumeProvider rootvolume.Provider) []nodeclass.Option {
+	var opts []nodeclass.Option
+	if snapshotAPI, ok := ec2api.(nodeclass.SnapshotAPI); ok {
+		opts = append(opts, nodeclass.WithSnapshotAPI(snapshotAPI))
+	}
+	if rootVolumeProvider != nil {
+		opts = append(opts, nodeclass.WithRootVolumeProvider(rootVolumeProvider))
+	}
+	return opts
 }

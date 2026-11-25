@@ -51,6 +51,13 @@ type Instance struct {
 	CapacityReservationDetails *CapacityReservationDetails
 	Tenancy                    string
 	PartitionNumber            *int32
+	// BootMode is the boot mode the instance booted with (currentInstanceBootMode).
+	BootMode        ec2types.InstanceBootModeValues
+	EnaSupport      bool
+	SriovNetSupport string
+	// TpmSupport is set when NitroTPM is enabled on the instance.
+	TpmSupport   string
+	ProductCodes []string
 }
 
 type CapacityReservationDetails struct {
@@ -95,7 +102,19 @@ func NewInstance(ctx context.Context, instance ec2types.Instance) *Instance {
 		CapacityReservationDetails: capacityReservationDetails,
 		Tenancy:                    tenancyFromInstance(instance),
 		PartitionNumber:            partitionNumberFromInstance(instance),
+		BootMode:                   instance.CurrentInstanceBootMode,
+		EnaSupport:                 lo.FromPtr(instance.EnaSupport),
+		SriovNetSupport:            lo.FromPtr(instance.SriovNetSupport),
+		TpmSupport:                 lo.FromPtr(instance.TpmSupport),
+		ProductCodes:               productCodesFromInstance(instance),
 	}
+}
+
+func productCodesFromInstance(instance ec2types.Instance) []string {
+	if len(instance.ProductCodes) == 0 {
+		return nil
+	}
+	return lo.Map(instance.ProductCodes, func(pc ec2types.ProductCode, _ int) string { return lo.FromPtr(pc.ProductCodeId) })
 }
 
 func partitionNumberFromInstance(instance ec2types.Instance) *int32 {

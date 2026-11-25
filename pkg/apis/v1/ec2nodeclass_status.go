@@ -78,6 +78,46 @@ type AMI struct {
 	// Requirements of the AMI to be utilized on an instance type
 	// +required
 	Requirements []corev1.NodeSelectorRequirement `json:"requirements"`
+	// InPlaceUpgrade reports whether nodes can move to this AMI by replacing their root volume in place. It is only
+	// set when the EC2NodeClass's amiDriftPolicy is ReplaceRootVolume. It is excluded from hashing so that changes
+	// to it don't invalidate caches keyed on the resolved AMIs.
+	// +optional
+	InPlaceUpgrade *InPlaceUpgrade `json:"inPlaceUpgrade,omitempty" hash:"ignore"`
+}
+
+// Reasons an AMI can't be used for an in-place root volume replacement, reported in status.amis[].inPlaceUpgrade.
+const (
+	// InPlaceUpgradeReasonUnsupportedAMIFamily is set for Windows and Custom AMI families. Windows takes a long first
+	// boot on a fresh root, and Karpenter can't tell which OS or Kubernetes version a Custom AMI carries.
+	InPlaceUpgradeReasonUnsupportedAMIFamily = "UnsupportedAMIFamily"
+	// InPlaceUpgradeReasonProductCodes is set when the AMI carries Marketplace product codes.
+	InPlaceUpgradeReasonProductCodes = "ProductCodes"
+	// InPlaceUpgradeReasonSnapshotNotReadable is set when the account can't create a volume from the AMI's root
+	// snapshot, or the AMI has no EBS root snapshot.
+	InPlaceUpgradeReasonSnapshotNotReadable = "SnapshotNotReadable"
+	// InPlaceUpgradeReasonPermissionDenied is set when a DryRun CreateReplaceRootVolumeTask toward the AMI, with the
+	// same parameters as the real call, fails with UnauthorizedOperation. The message names the denied action.
+	InPlaceUpgradeReasonPermissionDenied = "PermissionDenied"
+	// InPlaceUpgradeReasonUnknown is set when a check couldn't be completed. Nodes wait for a grace period instead of
+	// being replaced right away.
+	InPlaceUpgradeReasonUnknown = "Unknown"
+)
+
+// InPlaceUpgrade reports whether an AMI passes the AMI-level checks for an in-place root volume replacement.
+type InPlaceUpgrade struct {
+	// Supported is true when nodes can move to this AMI in place, subject to per-node checks.
+	// +required
+	Supported bool `json:"supported"`
+	// Reason names the check that failed when Supported is false.
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// Message says which check couldn't complete when Reason is Unknown.
+	// +optional
+	Message string `json:"message,omitempty"`
+	// LastTransitionTime is when Supported, Reason or Message last changed. Nodes wait on an Unknown result only for
+	// a grace period measured from this time, then are replaced.
+	// +optional
+	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
 }
 
 type CapacityReservation struct {

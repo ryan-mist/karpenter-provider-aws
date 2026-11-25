@@ -82,6 +82,7 @@ func main() {
 		op.PlacementGroupProvider,
 		op.InstanceTypeStore,
 		lo.ToPtr(""),
+		nil,
 	)
 	instanceTypes := lo.Must(cloudProvider.GetInstanceTypes(ctx, nil))
 

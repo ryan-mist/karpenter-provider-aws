@@ -89,6 +89,8 @@ type Provider interface {
 	Delete(context.Context, string) error
 	Reboot(context.Context, string, string) error
 	CreateTags(context.Context, string, map[string]string) error
+	// IsZonalShifted returns whether the instance is in an availability zone that is zonally shifted away from.
+	IsZonalShifted(context.Context, *Instance) bool
 }
 
 type options struct {
@@ -334,7 +336,7 @@ func (p *DefaultProvider) Reboot(ctx context.Context, id string, operationID str
 		return err
 	}
 	// Avoid rebooting instances during zonal shift
-	if out.ZoneID != "" && p.zonalshiftProvider.IsZonalShifted(ctx, out.ZoneID) {
+	if p.IsZonalShifted(ctx, out) {
 		return fmt.Errorf("instance %s is in zonally shifted availability zone %s (%s), skipping reboot", id, out.Zone, out.ZoneID)
 	}
 	if _, err := p.ec2api.RebootInstances(ctx, &ec2.RebootInstancesInput{
@@ -350,6 +352,10 @@ func (p *DefaultProvider) Reboot(ctx context.Context, id string, operationID str
 		return fmt.Errorf("rebooting instance, %w", err)
 	}
 	return nil
+}
+
+func (p *DefaultProvider) IsZonalShifted(ctx context.Context, i *Instance) bool {
+	return i.ZoneID != "" && p.zonalshiftProvider.IsZonalShifted(ctx, i.ZoneID)
 }
 
 func (p *DefaultProvider) CreateTags(ctx context.Context, id string, tags map[string]string) error {

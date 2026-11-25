@@ -90,6 +90,7 @@ var cluster *state.Cluster
 var fakeClock *clock.FakeClock
 var recorder events.Recorder
 var testCABundle = lo.ToPtr("test-ca-bundle")
+var rootVolumeProvider *fake.RootVolumeProvider
 
 func TestAWS(t *testing.T) {
 	ctx = TestContextWithLogger(t)
@@ -109,8 +110,9 @@ var _ = BeforeSuite(func() {
 	awsEnv = test.NewEnvironment(ctx, env)
 	fakeClock = clock.NewFakeClock(time.Now())
 	recorder = events.NewRecorder(&record.FakeRecorder{})
+	rootVolumeProvider = fake.NewRootVolumeProvider()
 	cloudProvider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, recorder,
-		env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore, lo.ToPtr("test-ca-bundle"))
+		env.Client, awsEnv.AMIProvider, awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore, lo.ToPtr("test-ca-bundle"), rootVolumeProvider)
 	cluster = state.NewCluster(fakeClock, env.Client, cloudProvider)
 	prov = provisioning.NewProvisioner(env.Client, recorder, cloudProvider, cluster, fakeClock, deviceallocation.NewController(env.Client), virtualpods.NewVirtualPodCache(env.Client), prediction.NewStore(env.Client))
 })
@@ -126,6 +128,7 @@ var _ = BeforeEach(func() {
 
 	cluster.Reset()
 	awsEnv.Reset()
+	rootVolumeProvider.Reset()
 })
 
 var _ = AfterEach(func() {
@@ -349,7 +352,7 @@ var _ = Describe("CloudProvider", func() {
 			eventRecorder = coretest.NewEventRecorder()
 			provider = cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, eventRecorder, env.Client, awsEnv.AMIProvider,
 				awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore,
-				lo.ToPtr("test-ca-bundle"))
+				lo.ToPtr("test-ca-bundle"), nil)
 		})
 		DescribeTable("should warn when a requirement uses a managed node group label",
 			func(key string, operator corev1.NodeSelectorOperator, hint string, values ...string) {
@@ -400,7 +403,7 @@ var _ = Describe("CloudProvider", func() {
 		newCloudProvider := func(opts ...cloudprovider.Option) *cloudprovider.CloudProvider {
 			return cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, recorder, env.Client, awsEnv.AMIProvider,
 				awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore,
-				lo.ToPtr("test-ca-bundle"), opts...)
+				lo.ToPtr("test-ca-bundle"), nil, opts...)
 		}
 		It("should return the 1.14 repair policies with WithLegacyRepairPolicies", func() {
 			replace := func(conditionType corev1.NodeConditionType, status corev1.ConditionStatus, toleration time.Duration) corecloudprovider.RepairPolicy {
@@ -436,7 +439,7 @@ var _ = Describe("CloudProvider", func() {
 				}))
 				awsCloudProvider := cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, recorder, env.Client, awsEnv.AMIProvider,
 					awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore,
-					testCABundle, cloudprovider.WithLegacyRepairPolicies(legacyNodeRepair), cloudprovider.WithRebootForRepair(rebootForRepair))
+					testCABundle, nil, cloudprovider.WithLegacyRepairPolicies(legacyNodeRepair), cloudprovider.WithRebootForRepair(rebootForRepair))
 				overlayUndecoratedCloudProvider := metrics.Decorate(awsCloudProvider)
 				startupCloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, env.Client, awsEnv.InstanceTypeStore)
 
@@ -463,7 +466,7 @@ var _ = Describe("CloudProvider", func() {
 		newMatcher := func(rebootForRepair bool) *health.RepairPolicyMatcher {
 			provider := cloudprovider.New(awsEnv.InstanceTypesProvider, awsEnv.InstanceProvider, recorder, env.Client, awsEnv.AMIProvider,
 				awsEnv.SecurityGroupProvider, awsEnv.CapacityReservationProvider, awsEnv.PlacementGroupProvider, awsEnv.InstanceTypeStore,
-				lo.ToPtr("test-ca-bundle"), cloudprovider.WithRebootForRepair(rebootForRepair))
+				lo.ToPtr("test-ca-bundle"), nil, cloudprovider.WithRebootForRepair(rebootForRepair))
 			repairCtx := coreoptions.ToContext(ctx, coretest.Options(coretest.OptionsFields{FeatureGates: coretest.FeatureGates{NodeRepair: lo.ToPtr(true)}}))
 			m, err := health.NewRepairPolicyMatcher(repairCtx, provider)
 			Expect(err).ToNot(HaveOccurred())
