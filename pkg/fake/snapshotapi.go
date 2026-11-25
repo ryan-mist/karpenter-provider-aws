@@ -16,17 +16,21 @@ package fake
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/smithy-go"
 	"github.com/samber/lo"
 )
 
-// SnapshotAPI fakes ec2:DescribeSnapshots. Snapshots maps a snapshot ID to the restorable-by values ("self", "all")
-// it matches.
+// SnapshotAPI fakes ec2:DescribeSnapshots. Snapshots maps each snapshot the account can create a volume from to the
+// restorable-by values it matches: "self" for snapshots the account owns or that are shared with it, "all" for public
+// ones. Snapshots missing from the map aren't visible to the account. Like EC2, a call without restorable-by values
+// returns every visible snapshot, and listing an invisible one in SnapshotIds fails the whole call.
 type SnapshotAPI struct {
 	mu        sync.Mutex
 	Snapshots map[string][]string
@@ -54,6 +58,13 @@ func (s *SnapshotAPI) SetReadable(snapshotID string) {
 	s.Snapshots[snapshotID] = []string{"self"}
 }
 
+// SetPublic makes the snapshot public, which lets every account create a volume from it.
+func (s *SnapshotAPI) SetPublic(snapshotID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Snapshots[snapshotID] = []string{"all"}
+}
+
 func (s *SnapshotAPI) CallCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -66,6 +77,11 @@ func (s *SnapshotAPI) DescribeSnapshots(_ context.Context, input *ec2.DescribeSn
 	s.Calls = append(s.Calls, input)
 	if s.Error != nil {
 		return nil, s.Error
+	}
+	for _, id := range input.SnapshotIds {
+		if _, ok := s.Snapshots[id]; !ok {
+			return nil, &smithy.GenericAPIError{Code: "InvalidSnapshot.NotFound", Message: fmt.Sprintf("The snapshot '%s' does not exist.", id)}
+		}
 	}
 	var ids []string
 	for _, f := range input.Filters {

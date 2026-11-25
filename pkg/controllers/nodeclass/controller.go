@@ -132,7 +132,7 @@ type controllerOptions struct {
 // Option configures the EC2NodeClass controller.
 type Option func(*controllerOptions)
 
-// WithSnapshotAPI sets the EC2 client the in-place upgrade snapshot check uses. Without it, every private AMI on a
+// WithSnapshotAPI sets the EC2 client the in-place upgrade snapshot check uses. Without it, every AMI on a
 // ReplaceRootVolume EC2NodeClass is reported with reason Unknown.
 func WithSnapshotAPI(api SnapshotAPI) Option {
 	return func(o *controllerOptions) { o.snapshotAPI = api }

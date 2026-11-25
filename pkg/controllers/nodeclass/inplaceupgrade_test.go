@@ -125,9 +125,15 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
 		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
 		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
+		Expect(snapshotAPI.Calls).To(HaveLen(1))
 		input := snapshotAPI.Calls[0]
-		Expect(input.RestorableByUserIds).To(Equal([]string{"self"}))
+		// No restorable-by or owner values, so public snapshots are returned too, and no SnapshotIds, which would
+		// fail the whole call when one snapshot isn't visible.
+		Expect(input.RestorableByUserIds).To(BeEmpty())
+		Expect(input.OwnerIds).To(BeEmpty())
+		Expect(input.SnapshotIds).To(BeEmpty())
 		Expect(input.Filters).To(HaveLen(1))
+		Expect(aws.ToString(input.Filters[0].Name)).To(Equal("snapshot-id"))
 		Expect(input.Filters[0].Values).To(ConsistOf("snap-amd64", "snap-arm64"))
 	})
 	It("should check the root device's snapshot, not other volumes in the AMI", func() {
@@ -145,32 +151,37 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		Expect(inPlaceUpgrade("ami-arm64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}))
 		Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
 	})
-	It("should accept a public snapshot", func() {
-		snapshotAPI.Snapshots["snap-arm64"] = []string{"all"}
-		ExpectApplied(ctx, env.Client, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
-		Expect(inPlaceUpgrade("ami-arm64").Supported).To(BeTrue())
-		Expect(snapshotAPI.Calls).To(HaveLen(2))
-		Expect(snapshotAPI.Calls[1].RestorableByUserIds).To(Equal([]string{"all"}))
-		Expect(snapshotAPI.Calls[1].Filters[0].Values).To(ConsistOf("snap-arm64"))
-	})
+	DescribeTable("should check the root snapshot of every AMI, public or private",
+		func(public bool, visibility string, expected *v1.InPlaceUpgrade) {
+			arm64Image.Public = aws.Bool(public)
+			setImages(amd64Image, arm64Image)
+			switch visibility {
+			case "public":
+				snapshotAPI.SetPublic("snap-arm64")
+			case "shared":
+				snapshotAPI.SetReadable("snap-arm64")
+			default:
+				delete(snapshotAPI.Snapshots, "snap-arm64")
+			}
+			ExpectApplied(ctx, env.Client, nodeClass)
+			ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
+			Expect(inPlaceUpgrade("ami-arm64")).To(Equal(expected))
+			Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
+			Expect(snapshotAPI.Calls).To(HaveLen(1))
+			Expect(snapshotAPI.Calls[0].Filters[0].Values).To(ContainElement("snap-arm64"))
+		},
+		Entry("public AMI with a public snapshot", true, "public", &v1.InPlaceUpgrade{Supported: true}),
+		Entry("public AMI with a snapshot that isn't shared", true, "unshared", &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}),
+		Entry("private AMI with a public snapshot", false, "public", &v1.InPlaceUpgrade{Supported: true}),
+		Entry("private AMI with a shared snapshot", false, "shared", &v1.InPlaceUpgrade{Supported: true}),
+		Entry("private AMI with a snapshot that isn't shared", false, "unshared", &v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}),
+	)
 	It("should mark AMIs without an EBS root snapshot as SnapshotNotReadable", func() {
 		amd64Image.RootDeviceName = aws.String("/dev/sda1")
 		setImages(amd64Image, arm64Image)
 		ExpectApplied(ctx, env.Client, nodeClass)
 		ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
 		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonSnapshotNotReadable}))
-	})
-	It("should skip the snapshot check for public AMIs", func() {
-		amd64Image.Public = aws.Bool(true)
-		arm64Image.Public = aws.Bool(true)
-		snapshotAPI.Reset()
-		setImages(amd64Image, arm64Image)
-		ExpectApplied(ctx, env.Client, nodeClass)
-		ExpectObjectReconciled(ctx, env.Client, inPlaceController, nodeClass)
-		Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
-		Expect(inPlaceUpgrade("ami-arm64").Supported).To(BeTrue())
-		Expect(snapshotAPI.CallCount()).To(Equal(0))
 	})
 	It("should mark AMIs with Marketplace product codes as ProductCodes", func() {
 		amd64Image.ProductCodes = []ec2types.ProductCode{{ProductCodeId: aws.String("abc123"), ProductCodeType: ec2types.ProductCodeValuesMarketplace}}
@@ -230,7 +241,7 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 		Expect(nodeClass.StatusConditions().Get(v1.ConditionTypeAMIsReady).IsTrue()).To(BeTrue())
 		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "describing the AMI failed"}))
 	})
-	It("should report Unknown for private AMIs when no snapshot API is configured", func() {
+	It("should report Unknown when no snapshot API is configured", func() {
 		ExpectApplied(ctx, env.Client, nodeClass)
 		ExpectObjectReconciled(ctx, env.Client, newController(), nodeClass)
 		Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Reason: v1.InPlaceUpgradeReasonUnknown, Message: "checking the root snapshot's permissions failed"}))

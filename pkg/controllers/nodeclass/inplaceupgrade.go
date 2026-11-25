@@ -64,7 +64,7 @@ type InPlaceUpgrade struct {
 	snapshotCache *cache.Cache
 }
 
-// NewInPlaceUpgradeReconciler builds the reconciler. snapshotAPI may be nil, in which case every private AMI is
+// NewInPlaceUpgradeReconciler builds the reconciler. snapshotAPI may be nil, in which case every AMI is
 // reported Unknown.
 func NewInPlaceUpgradeReconciler(clk clock.Clock, amiProvider amifamily.Provider, snapshotAPI SnapshotAPI) *InPlaceUpgrade {
 	return &InPlaceUpgrade{
@@ -122,10 +122,6 @@ func (u *InPlaceUpgrade) Reconcile(ctx context.Context, nodeClass *v1.EC2NodeCla
 			unsupported(id, v1.InPlaceUpgradeReasonProductCodes)
 		case image.RootSnapshotID == "":
 			unsupported(id, v1.InPlaceUpgradeReasonSnapshotNotReadable)
-		case image.Public:
-			// RunInstances and CreateReplaceRootVolumeTask both work from public AMIs whose snapshots aren't shared
-			// with the account, as the public EKS optimized AMIs are, so the snapshot check only covers private AMIs.
-			results[id] = &v1.InPlaceUpgrade{Supported: true}
 		default:
 			needSnapshot[id] = image.RootSnapshotID
 		}
@@ -187,24 +183,21 @@ func (u *InPlaceUpgrade) readableSnapshots(ctx context.Context, snapshotIDs []st
 	if u.snapshotAPI == nil {
 		return out, fmt.Errorf("describing snapshots, no snapshot API configured")
 	}
+	// Without owner or restorable-by parameters, DescribeSnapshots returns every snapshot the account can create a
+	// volume from: its own, those shared with it and public ones. The snapshot-id filter drops the ones it can't
+	// read from the result, where listing them in SnapshotIds would fail the whole call.
 	found := map[string]bool{}
-	// "self" covers snapshots the account owns or that were shared with it; "all" covers public snapshots. They are
-	// separate calls because the API doesn't document how several restorable-by values combine.
-	for _, restorableBy := range []string{"self", "all"} {
-		remaining := lo.Reject(misses, func(id string, _ int) bool { return found[id] })
-		for _, chunk := range lo.Chunk(remaining, 200) {
-			paginator := ec2.NewDescribeSnapshotsPaginator(u.snapshotAPI, &ec2.DescribeSnapshotsInput{
-				Filters:             []ec2types.Filter{{Name: aws.String("snapshot-id"), Values: chunk}},
-				RestorableByUserIds: []string{restorableBy},
-			})
-			for paginator.HasMorePages() {
-				page, err := paginator.NextPage(ctx)
-				if err != nil {
-					return out, fmt.Errorf("describing snapshots, %w", err)
-				}
-				for _, snapshot := range page.Snapshots {
-					found[lo.FromPtr(snapshot.SnapshotId)] = true
-				}
+	for _, chunk := range lo.Chunk(misses, 200) {
+		paginator := ec2.NewDescribeSnapshotsPaginator(u.snapshotAPI, &ec2.DescribeSnapshotsInput{
+			Filters: []ec2types.Filter{{Name: aws.String("snapshot-id"), Values: chunk}},
+		})
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				return out, fmt.Errorf("describing snapshots, %w", err)
+			}
+			for _, snapshot := range page.Snapshots {
+				found[lo.FromPtr(snapshot.SnapshotId)] = true
 			}
 		}
 	}

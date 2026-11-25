@@ -49,7 +49,6 @@ type Image struct {
 	ProductCodes    []string
 	// RootSnapshotID is the snapshot behind the image's root device, or empty if the image has none.
 	RootSnapshotID string
-	Public         bool
 }
 
 func NewImage(image ec2types.Image) *Image {
@@ -74,7 +73,6 @@ func NewImage(image ec2types.Image) *Image {
 			return lo.FromPtr(pc.ProductCodeId)
 		}),
 		RootSnapshotID: rootSnapshotID,
-		Public:         lo.FromPtr(image.Public),
 	}
 }
 
