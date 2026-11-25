@@ -69,6 +69,14 @@ type Provider interface {
 	// Latest returns the most recent task Karpenter created on the instance, or nil if there is none. It reads the
 	// cache and describes the instance on a miss.
 	Latest(ctx context.Context, instanceID string) (*Task, error)
+	// RecordRejection remembers that Karpenter gave up replacing the instance's root volume from imageID, because a
+	// check failed or EC2 deterministically rejected the task when the reboot was issued. reason names the check or
+	// the EC2 error code. Records are kept in memory only, so they are lost on restart.
+	RecordRejection(instanceID, imageID, reason string)
+	// Rejection returns the reason recorded for the instance and imageID, if any.
+	Rejection(instanceID, imageID string) (string, bool)
+	// LastRejection returns when a rejection toward imageID was last recorded on any instance, or the zero time.
+	LastRejection(imageID string) time.Time
 	// Failures returns Karpenter's failed tasks toward imageID that completed after since, across all instances. It
 	// only reads the cache.
 	Failures(imageID string, since time.Time) int

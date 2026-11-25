@@ -413,6 +413,23 @@ var _ = Describe("NodeClass InPlaceUpgrade Status Controller", func() {
 			Expect(awsEnv.EC2API.CreateReplaceRootVolumeTaskBehavior.Calls()).To(Equal(calls + 2))
 			Expect(inPlaceUpgrade("ami-amd64")).To(Equal(&v1.InPlaceUpgrade{Supported: true}))
 		})
+		It("should run the dry run again when a drift reboot's task was rejected after the cached result", func() {
+			ExpectObjectReconciled(ctx, env.Client, dryRunController, nodeClass)
+			Expect(inPlaceUpgrade("ami-amd64").Supported).To(BeTrue())
+			calls := awsEnv.EC2API.CreateReplaceRootVolumeTaskBehavior.Calls()
+			// The role lost the permission, and a drift reboot found out first.
+			awsEnv.EC2API.DenyReplaceRootVolumeTask("ec2:CreateReplaceRootVolumeTask")
+			awsEnv.Clock.Step(time.Second)
+			rootVolumes.RecordRejection("i-0123456789abcdef0", "ami-amd64", "UnauthorizedOperation")
+			ExpectObjectReconciled(ctx, env.Client, dryRunController, nodeClass)
+			// Only the AMI with the rejection is checked again; the other keeps its cached result.
+			Expect(awsEnv.EC2API.CreateReplaceRootVolumeTaskBehavior.Calls()).To(Equal(calls + 1))
+			Expect(inPlaceUpgrade("ami-amd64").Reason).To(Equal(v1.InPlaceUpgradeReasonPermissionDenied))
+			Expect(inPlaceUpgrade("ami-arm64").Supported).To(BeTrue())
+			// The new result is cached again.
+			ExpectObjectReconciled(ctx, env.Client, dryRunController, nodeClass)
+			Expect(awsEnv.EC2API.CreateReplaceRootVolumeTaskBehavior.Calls()).To(Equal(calls + 1))
+		})
 		It("should leave the check pending without calling EC2 when the EC2NodeClass has no running node", func() {
 			ExpectDeleted(ctx, env.Client, nodeClaim)
 			ExpectObjectReconciled(ctx, env.Client, dryRunController, nodeClass)

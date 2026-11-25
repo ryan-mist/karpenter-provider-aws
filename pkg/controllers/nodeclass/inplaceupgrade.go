@@ -200,7 +200,10 @@ func (u *InPlaceUpgrade) checkPermissions(ctx context.Context, nodeClass *v1.EC2
 		if !result.Supported {
 			continue
 		}
-		if v, ok := u.dryRunCache.Get(dryRunCacheKey(nodeClass, id)); ok && u.clk.Since(v.(dryRunResult).at) < dryRunTTL {
+		// A rejection recorded after the cached result, such as EC2 refusing a drift reboot's task, may be a role change
+		// that affects the whole EC2NodeClass, so the dry run runs again.
+		if v, ok := u.dryRunCache.Get(dryRunCacheKey(nodeClass, id)); ok && u.clk.Since(v.(dryRunResult).at) < dryRunTTL &&
+			!u.rootVolumeProvider.LastRejection(id).After(v.(dryRunResult).at) {
 			applyDryRun(results, id, v.(dryRunResult))
 			continue
 		}

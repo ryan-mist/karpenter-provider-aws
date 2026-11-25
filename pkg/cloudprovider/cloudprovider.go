@@ -322,7 +322,8 @@ func (c *CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 }
 
 // Reboot restarts the instance. A reboot committed to resolve AMI drift on a ReplaceRootVolume EC2NodeClass replaces
-// the root volume from the target AMI instead; every other reboot, including repair, is a plain RebootInstances.
+// the root volume from the target AMI instead, or plainly reboots when the swap can't be issued; every other reboot,
+// including repair, is a plain RebootInstances.
 func (c *CloudProvider) Reboot(ctx context.Context, nodeClaim *karpv1.NodeClaim, operationID string) error {
 	id, err := utils.ParseInstanceID(nodeClaim.Status.ProviderID)
 	if err != nil {

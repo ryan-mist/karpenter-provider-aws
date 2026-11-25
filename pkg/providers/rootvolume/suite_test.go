@@ -142,6 +142,42 @@ var _ = Describe("DryRun", func() {
 	})
 })
 
+var _ = Describe("Rejections", func() {
+	It("should remember a rejection per instance and image", func() {
+		_, ok := provider.Rejection("i-a", "ami-1")
+		Expect(ok).To(BeFalse())
+		provider.RecordRejection("i-a", "ami-1", "InvalidSnapshot.NotFound")
+		reason, ok := provider.Rejection("i-a", "ami-1")
+		Expect(ok).To(BeTrue())
+		Expect(reason).To(Equal("InvalidSnapshot.NotFound"))
+		_, ok = provider.Rejection("i-a", "ami-2")
+		Expect(ok).To(BeFalse())
+		_, ok = provider.Rejection("i-b", "ami-1")
+		Expect(ok).To(BeFalse())
+	})
+	It("should report when a rejection toward an image was last recorded", func() {
+		Expect(provider.LastRejection("ami-1").IsZero()).To(BeTrue())
+		provider.RecordRejection("i-a", "ami-1", "UnauthorizedOperation")
+		first := fakeClock.Now()
+		Expect(provider.LastRejection("ami-1")).To(BeTemporally("==", first))
+		fakeClock.Step(time.Minute)
+		provider.RecordRejection("i-b", "ami-1", "UnauthorizedOperation")
+		Expect(provider.LastRejection("ami-1")).To(BeTemporally("==", first.Add(time.Minute)))
+		Expect(provider.LastRejection("ami-2").IsZero()).To(BeTrue())
+	})
+	It("should keep rejections that are read and drop ones that aren't read for a day", func() {
+		provider.RecordRejection("i-live", "ami-1", "OperationNotPermitted")
+		provider.RecordRejection("i-gone", "ami-1", "OperationNotPermitted")
+		for i := 0; i < 25; i++ {
+			fakeClock.Step(time.Hour)
+			_, ok := provider.Rejection("i-live", "ami-1")
+			Expect(ok).To(BeTrue())
+		}
+		_, ok := provider.Rejection("i-gone", "ami-1")
+		Expect(ok).To(BeFalse())
+	})
+})
+
 var _ = Describe("Create", func() {
 	var instanceID, imageID, token string
 	BeforeEach(func() {

@@ -95,6 +95,17 @@ type instanceEntry struct {
 	lastAccess time.Time
 }
 
+type rejection struct {
+	reason     string
+	at         time.Time
+	lastAccess time.Time
+}
+
+type rejectionKey struct {
+	instanceID string
+	imageID    string
+}
+
 var _ Provider = (*DefaultProvider)(nil)
 
 type DefaultProvider struct {
@@ -109,7 +120,9 @@ type DefaultProvider struct {
 	tasks map[string]*entry
 	// instances indexes tasks by instance ID
 	instances map[string]*instanceEntry
-	lastGC    time.Time
+	// rejections holds the replacements Karpenter gave up on, by instance and target image
+	rejections map[rejectionKey]*rejection
+	lastGC     time.Time
 }
 
 func NewDefaultProvider(ctx context.Context, ec2api sdk.EC2API, clk clock.Clock, clusterName string) *DefaultProvider {
@@ -120,6 +133,7 @@ func NewDefaultProvider(ctx context.Context, ec2api sdk.EC2API, clk clock.Clock,
 		clusterName: clusterName,
 		tasks:       map[string]*entry{},
 		instances:   map[string]*instanceEntry{},
+		rejections:  map[rejectionKey]*rejection{},
 		lastGC:      clk.Now(),
 	}
 }
@@ -218,6 +232,38 @@ func (p *DefaultProvider) Latest(ctx context.Context, instanceID string) (*Task,
 	return p.cachedLatest(instanceID), nil
 }
 
+func (p *DefaultProvider) RecordRejection(instanceID, imageID, reason string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gc()
+	now := p.clk.Now()
+	p.rejections[rejectionKey{instanceID: instanceID, imageID: imageID}] = &rejection{reason: reason, at: now, lastAccess: now}
+}
+
+func (p *DefaultProvider) Rejection(instanceID, imageID string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.gc()
+	r, ok := p.rejections[rejectionKey{instanceID: instanceID, imageID: imageID}]
+	if !ok {
+		return "", false
+	}
+	r.lastAccess = p.clk.Now()
+	return r.reason, true
+}
+
+func (p *DefaultProvider) LastRejection(imageID string) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var last time.Time
+	for k, r := range p.rejections {
+		if k.imageID == imageID && r.at.After(last) {
+			last = r.at
+		}
+	}
+	return last
+}
+
 func (p *DefaultProvider) Failures(imageID string, since time.Time) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -298,7 +344,7 @@ func (p *DefaultProvider) cachedLatest(instanceID string) *Task {
 	return lo.ToPtr(tasks[0])
 }
 
-// gc drops instances that have not been read or written within cacheRetention. It must be called with p.mu held.
+// gc drops instances and rejections that have not been read or written within cacheRetention. It must be called with p.mu held.
 func (p *DefaultProvider) gc() {
 	if p.clk.Since(p.lastGC) < gcInterval {
 		return
@@ -312,6 +358,13 @@ func (p *DefaultProvider) gc() {
 			delete(p.tasks, taskID)
 		}
 		delete(p.instances, id)
+	}
+	// Drift reads a live NodeClaim's rejection on every pass, which keeps it; the instances of deleted NodeClaims age
+	// out.
+	for k, r := range p.rejections {
+		if p.clk.Since(r.lastAccess) >= cacheRetention {
+			delete(p.rejections, k)
+		}
 	}
 }
 

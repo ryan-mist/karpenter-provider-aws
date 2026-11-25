@@ -64,6 +64,9 @@ const (
 	// InPlaceGateChecksIncomplete is the gate when the target AMI's checks stayed Unknown past
 	// InPlaceUpgradeUnknownGracePeriod.
 	InPlaceGateChecksIncomplete = "InPlaceUpgradeUnknown"
+	// InPlaceGatePreviousAttemptRejected is the gate after a drift reboot toward the target fell back to a plain
+	// reboot, because a gate failed or EC2 rejected the task when the reboot was issued.
+	InPlaceGatePreviousAttemptRejected = "PreviousAttemptRejected"
 )
 
 const (
@@ -84,7 +87,8 @@ var (
 )
 
 // deterministicCreateErrorCodes are CreateReplaceRootVolumeTask errors that won't succeed on retry, so the reboot
-// fails right away instead of waiting out core's issuance timeout. Prefix matches cover the families EC2 returns.
+// falls back to a plain reboot right away instead of waiting out core's issuance timeout. Prefix matches cover the
+// families EC2 returns.
 var (
 	deterministicCreateErrorCodes        = []string{awserrors.UnauthorizedOperationErrorCode, "InvalidSnapshot.NotFound", "OperationNotPermitted", "IdempotentParameterMismatch"}
 	deterministicCreateErrorCodePrefixes = []string{"InvalidParameter", "InvalidAMIID."}
@@ -218,6 +222,11 @@ func (c *CloudProvider) evaluateInPlace(ctx context.Context, nodeClaim *karpv1.N
 	case failedImageID != "" && failedImageID == target.ID:
 		// Karpenter's last attempt toward this exact target failed. Retrying in place would likely fail the same way.
 		e.gate = InPlaceGatePreviousAttemptFailed
+		return e, nil
+	case c.wasRejected(instanceID, target.ID):
+		// The node was already drained and plainly rebooted because the swap toward this target couldn't be issued.
+		// Draining it again would end the same way, so replace it.
+		e.gate = InPlaceGatePreviousAttemptRejected
 		return e, nil
 	}
 	e.target = target
@@ -392,6 +401,11 @@ func disruptionReason(nodeClaim *karpv1.NodeClaim) karpv1.DisruptionReason {
 
 // replaceRootVolume issues a drift reboot on a ReplaceRootVolume EC2NodeClass. The gates are re-evaluated from memory
 // because the target AMI or the node may have changed since the reboot was committed.
+//
+// When the node is still drifted but the swap can't go ahead, because a gate now fails or EC2 deterministically
+// rejects the task, the node is plainly rebooted instead. It is already drained, so a reboot costs little and brings
+// it back on its current AMI. The rejection is recorded for the instance and target, so the next drift pass answers
+// ReplaceNode instead of draining the node again.
 func (c *CloudProvider) replaceRootVolume(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1.EC2NodeClass, instanceID, operationID string) error {
 	token := rootVolumeToken(operationID)
 	e, err := c.evaluateInPlace(ctx, nodeClaim, nodeClass, token)
@@ -405,33 +419,64 @@ func (c *CloudProvider) replaceRootVolume(ctx context.Context, nodeClaim *karpv1
 		// The drift resolved itself after the commit, for example because the EC2NodeClass was reverted.
 		return c.instanceProvider.Reboot(ctx, instanceID, operationID)
 	case e.gate != "":
-		return cloudprovider.NewNodeRebootFailedError(fmt.Errorf("%s, in-place replacement is no longer allowed (%s)", rootVolumeReplacementOperationPrefix, e.gate))
+		return c.rebootWithoutReplacing(ctx, nodeClaim, instanceID, lo.FromPtr(e.target).ID, operationID, e.gate)
 	default:
 		imageID = e.target.ID
 	}
 	ctx = log.IntoContext(ctx, log.FromContext(ctx).WithValues("image-id", imageID, "operation-id", operationID))
 	task, err := c.rootVolumeProvider.Create(ctx, instanceID, imageID, token)
 	if err != nil {
+		if code := deterministicCreateErrorCode(err); code != "" {
+			log.FromContext(ctx).Error(err, "failed replacing root volume")
+			return c.rebootWithoutReplacing(ctx, nodeClaim, instanceID, imageID, operationID, code)
+		}
 		return classifyCreateError(err)
 	}
 	log.FromContext(ctx).V(1).WithValues("task-id", task.ID, "state", task.State).Info("replacing root volume")
 	return nil
 }
 
-// classifyCreateError fails the reboot for errors retrying can't fix, and leaves everything else, such as throttling,
+// rebootWithoutReplacing falls back to a plain RebootInstances for a drift reboot whose swap can't be issued. cause
+// names the failed gate or EC2's error code. Recording the rejection first means a retry of this reboot, and every
+// later drift pass, skip the swap for this target. A deterministic RebootInstances failure still fails the reboot.
+//
+// The record lives in memory, so a restart loses it. Missing permissions are still caught after a restart by the
+// EC2NodeClass controller's dry run, which reruns once a rejection is recorded. Other rejections may cost one more
+// drain and plain reboot of the node before the record is rebuilt.
+func (c *CloudProvider) rebootWithoutReplacing(ctx context.Context, nodeClaim *karpv1.NodeClaim, instanceID, imageID, operationID, cause string) error {
+	if imageID != "" {
+		c.rootVolumeProvider.RecordRejection(instanceID, imageID, cause)
+	}
+	c.recorder.Publish(cloudproviderevents.NodeClaimInPlaceUpgradeRebootFallback(nodeClaim, cause))
+	log.FromContext(ctx).WithValues("image-id", imageID, "operation-id", operationID, "cause", cause).Info("rebooting without replacing the root volume")
+	return c.instanceProvider.Reboot(ctx, instanceID, operationID)
+}
+
+// wasRejected returns whether an earlier drift reboot of the instance toward imageID fell back to a plain reboot.
+func (c *CloudProvider) wasRejected(instanceID, imageID string) bool {
+	_, ok := c.rootVolumeProvider.Rejection(instanceID, imageID)
+	return ok
+}
+
+// deterministicCreateErrorCode returns the EC2 error code when retrying the create can't succeed, or "".
+func deterministicCreateErrorCode(err error) string {
+	var apiErr smithy.APIError
+	if !stderrors.As(err, &apiErr) {
+		return ""
+	}
+	code := apiErr.ErrorCode()
+	if lo.Contains(deterministicCreateErrorCodes, code) || lo.SomeBy(deterministicCreateErrorCodePrefixes, func(p string) bool { return strings.HasPrefix(code, p) }) {
+		return code
+	}
+	return ""
+}
+
+// classifyCreateError reports a terminated instance as not found, and leaves everything else, such as throttling,
 // server errors and a task already running on the instance, to core's retry with the same token.
 func classifyCreateError(err error) error {
 	wrapped := fmt.Errorf("%s, %w", rootVolumeReplacementOperationPrefix, err)
 	if awserrors.IsNotFound(err) {
 		return cloudprovider.NewNodeClaimNotFoundError(wrapped)
-	}
-	var apiErr smithy.APIError
-	if !stderrors.As(err, &apiErr) {
-		return wrapped
-	}
-	code := apiErr.ErrorCode()
-	if lo.Contains(deterministicCreateErrorCodes, code) || lo.SomeBy(deterministicCreateErrorCodePrefixes, func(p string) bool { return strings.HasPrefix(code, p) }) {
-		return cloudprovider.NewNodeRebootFailedError(wrapped)
 	}
 	return wrapped
 }

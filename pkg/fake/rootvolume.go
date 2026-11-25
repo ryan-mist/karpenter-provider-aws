@@ -42,6 +42,10 @@ type CreateRootVolumeTaskInput struct {
 type RootVolumeProvider struct {
 	mu    sync.Mutex
 	tasks map[string][]*rootvolume.Task
+	// Rejections holds recorded rejections by instance ID and then image ID.
+	Rejections map[string]map[string]string
+	// rejectedAt holds when a rejection toward each image ID was last recorded.
+	rejectedAt map[string]time.Time
 
 	CreateCalls []CreateRootVolumeTaskInput
 	// DryRunCalls records calls to DryRun.
@@ -55,13 +59,15 @@ type RootVolumeProvider struct {
 }
 
 func NewRootVolumeProvider() *RootVolumeProvider {
-	return &RootVolumeProvider{tasks: map[string][]*rootvolume.Task{}}
+	return &RootVolumeProvider{tasks: map[string][]*rootvolume.Task{}, Rejections: map[string]map[string]string{}, rejectedAt: map[string]time.Time{}}
 }
 
 func (p *RootVolumeProvider) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.tasks = map[string][]*rootvolume.Task{}
+	p.Rejections = map[string]map[string]string{}
+	p.rejectedAt = map[string]time.Time{}
 	p.CreateCalls = nil
 	p.CreateError = nil
 	p.DryRunCalls = nil
@@ -116,6 +122,29 @@ func (p *RootVolumeProvider) Latest(_ context.Context, instanceID string) (*root
 		return nil, nil
 	}
 	return lo.MaxBy(ours, func(a, b *rootvolume.Task) bool { return a.StartTime.After(b.StartTime) }), nil
+}
+
+func (p *RootVolumeProvider) RecordRejection(instanceID, imageID, reason string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.Rejections[instanceID] == nil {
+		p.Rejections[instanceID] = map[string]string{}
+	}
+	p.Rejections[instanceID][imageID] = reason
+	p.rejectedAt[imageID] = time.Now()
+}
+
+func (p *RootVolumeProvider) Rejection(instanceID, imageID string) (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	reason, ok := p.Rejections[instanceID][imageID]
+	return reason, ok
+}
+
+func (p *RootVolumeProvider) LastRejection(imageID string) time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.rejectedAt[imageID]
 }
 
 func (p *RootVolumeProvider) Failures(imageID string, since time.Time) int {

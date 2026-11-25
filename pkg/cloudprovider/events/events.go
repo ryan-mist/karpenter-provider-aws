@@ -86,6 +86,18 @@ func NodeClaimInPlaceUpgradeFallback(nodeClaim *karpv1.NodeClaim, gate string) e
 	}
 }
 
+// NodeClaimInPlaceUpgradeRebootFallback is emitted when a drift reboot on a ReplaceRootVolume EC2NodeClass plainly
+// reboots the drained node instead of replacing its root volume. cause names the failed gate or EC2's error code.
+func NodeClaimInPlaceUpgradeRebootFallback(nodeClaim *karpv1.NodeClaim, cause string) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClaim,
+		Type:           corev1.EventTypeWarning,
+		Reason:         "InPlaceUpgradeRebootFallback",
+		Message:        fmt.Sprintf("Rebooting the node without replacing its root volume (%s), drift will replace the node instead", cause),
+		DedupeValues:   []string{string(nodeClaim.UID), cause},
+	}
+}
+
 // EC2NodeClassInPlaceUpgradeIncomplete is emitted when nodes on an EC2NodeClass are replaced because the in-place
 // checks for an AMI couldn't complete within the grace period. message names the check.
 func EC2NodeClassInPlaceUpgradeIncomplete(nodeClass client.Object, amiID, message string) events.Event {

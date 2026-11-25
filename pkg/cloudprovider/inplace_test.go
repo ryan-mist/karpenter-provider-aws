@@ -655,20 +655,25 @@ var _ = Describe("In-place AMI drift", func() {
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
 			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(1))
 		})
-		It("should fail the reboot when a gate fails at issue time", func() {
+		It("should plainly reboot and name the gate when a gate fails at issue time", func() {
 			target(newStandardAMI).Name = eksImageName("standard", 34, "v2")
 			apply()
-			err := provider.Reboot(ctx, nodeClaim, operationID)
-			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeTrue())
-			Expect(err.Error()).To(ContainSubstring(cloudprovider.InPlaceGateKubernetesVersion))
+			Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
-			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(0))
+			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(1))
+			Expect(drainEvents()).To(ContainElement(And(ContainSubstring("Warning InPlaceUpgradeRebootFallback"), ContainSubstring(cloudprovider.InPlaceGateKubernetesVersion))))
+			Expect(rootVolumes.Rejections[aws.ToString(instance.InstanceId)]).To(HaveKeyWithValue(newStandardAMI, cloudprovider.InPlaceGateKubernetesVersion))
 		})
-		It("should fail the reboot when the node picked up another drift reason", func() {
+		It("should plainly reboot when the node picked up another drift reason", func() {
 			instance.SubnetId = aws.String(fake.SubnetID())
 			apply()
-			Expect(corecloudprovider.IsNodeRebootFailedError(provider.Reboot(ctx, nodeClaim, operationID))).To(BeTrue())
+			Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
+			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(1))
+			Expect(drainEvents()).To(ContainElement(ContainSubstring(cloudprovider.InPlaceGateNotAMIOnly)))
+			// The other drift reason replaces the node on its own.
+			setRebooting(karpv1.RebootReasonSucceeded, metav1.ConditionFalse)
+			Expect(driftStatus().Action).To(Equal(corecloudprovider.ReplaceNode))
 		})
 		It("should retry while the target AMI's checks are Unknown within the grace period", func() {
 			target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now())
@@ -678,13 +683,13 @@ var _ = Describe("In-place AMI drift", func() {
 			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeFalse())
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
 		})
-		It("should fail the reboot when the target AMI's checks are Unknown past the grace period", func() {
+		It("should plainly reboot when the target AMI's checks are Unknown past the grace period", func() {
 			target(newStandardAMI).InPlaceUpgrade = unknownSince(clk.Now().Add(-time.Hour))
 			apply()
-			err := provider.Reboot(ctx, nodeClaim, operationID)
-			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeTrue())
-			Expect(err.Error()).To(ContainSubstring(cloudprovider.InPlaceGateChecksIncomplete))
+			Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
+			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(1))
+			Expect(drainEvents()).To(ContainElement(And(ContainSubstring("InPlaceUpgradeRebootFallback"), ContainSubstring(cloudprovider.InPlaceGateChecksIncomplete))))
 		})
 		It("should retry while the target AMI's checks are pending", func() {
 			target(newStandardAMI).InPlaceUpgrade = nil
@@ -703,11 +708,14 @@ var _ = Describe("In-place AMI drift", func() {
 			Expect(rootVolumes.CreateCalls).To(BeEmpty())
 			Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(0))
 		})
-		DescribeTable("should fail the reboot on deterministic EC2 errors",
+		DescribeTable("should plainly reboot on deterministic EC2 errors and name the error",
 			func(code string) {
 				rootVolumes.CreateError = &smithy.GenericAPIError{Code: code, Message: "nope"}
-				err := provider.Reboot(ctx, nodeClaim, operationID)
-				Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeTrue())
+				Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
+				Expect(rootVolumes.CreateCalls).To(HaveLen(1))
+				Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(1))
+				Expect(drainEvents()).To(ContainElement(And(ContainSubstring("Warning InPlaceUpgradeRebootFallback"), ContainSubstring(code))))
+				Expect(rootVolumes.Rejections[aws.ToString(instance.InstanceId)]).To(HaveKeyWithValue(newStandardAMI, code))
 			},
 			Entry("UnauthorizedOperation", "UnauthorizedOperation"),
 			Entry("InvalidParameterValue", "InvalidParameterValue"),
@@ -725,6 +733,8 @@ var _ = Describe("In-place AMI drift", func() {
 				Expect(out).To(HaveOccurred())
 				Expect(corecloudprovider.IsNodeRebootFailedError(out)).To(BeFalse())
 				Expect(corecloudprovider.IsNodeClaimNotFoundError(out)).To(BeFalse())
+				Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(0))
+				Expect(rootVolumes.Rejections).To(BeEmpty())
 			},
 			Entry("throttling", &smithy.GenericAPIError{Code: "RequestLimitExceeded"}),
 			Entry("server error", &smithy.GenericAPIError{Code: "InternalError", Fault: smithy.FaultServer}),
@@ -736,6 +746,64 @@ var _ = Describe("In-place AMI drift", func() {
 		It("should report a terminated instance as not found", func() {
 			rootVolumes.CreateError = &smithy.GenericAPIError{Code: "InvalidInstanceID.NotFound"}
 			Expect(corecloudprovider.IsNodeClaimNotFoundError(provider.Reboot(ctx, nodeClaim, operationID))).To(BeTrue())
+		})
+		Context("after falling back to a plain reboot", func() {
+			BeforeEach(func() {
+				// The AMI's status still says supported: EC2's rejection isn't reflected there yet.
+				rootVolumes.CreateError = &smithy.GenericAPIError{Code: "InvalidSnapshot.NotFound", Message: "The snapshot does not exist."}
+				Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
+				Expect(target(newStandardAMI).InPlaceUpgrade.Supported).To(BeTrue())
+				drainEvents()
+				// The node came back on its old AMI.
+				setRebooting(karpv1.RebootReasonSucceeded, metav1.ConditionFalse)
+			})
+			It("should replace the node on the next drift pass instead of rebooting it again", func() {
+				expectFallback(cloudprovider.InPlaceGatePreviousAttemptRejected)
+				Expect(driftStatus()).To(Equal(corecloudprovider.DriftStatus{Action: corecloudprovider.ReplaceNode, Reason: cloudprovider.AMIDrift}))
+			})
+			It("should not try the swap again on a retry of the same reboot", func() {
+				rootVolumes.CreateError = nil
+				Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
+				Expect(rootVolumes.CreateCalls).To(HaveLen(1))
+				Expect(awsEnv.EC2API.RebootInstancesBehavior.CalledWithInput.Len()).To(Equal(2))
+			})
+			It("should only remember the rejection for that instance and target", func() {
+				// A newer target AMI gets its own attempt.
+				target(newStandardAMI).ID = "ami-newer-standard"
+				images["ami-newer-standard"] = image("ami-newer-standard", eksImageName("standard", 33, "v3"))
+				apply()
+				expectRebootNode()
+				// Another instance on the old target is unaffected.
+				target("ami-newer-standard").ID = newStandardAMI
+				instance.InstanceId = aws.String(fake.InstanceID())
+				nodeClaim.Status.ProviderID = fake.ProviderID(aws.ToString(instance.InstanceId))
+				apply()
+				expectRebootNode()
+			})
+			It("should lose the record on restart, costing at most one more drain", func() {
+				rootVolumes.Reset()
+				provider = newProvider()
+				expectRebootNode()
+			})
+		})
+		It("should keep failing the reboot when the plain reboot itself is denied", func() {
+			rootVolumes.CreateError = &smithy.GenericAPIError{Code: "UnauthorizedOperation", Message: "nope"}
+			awsEnv.EC2API.RebootInstancesBehavior.Error.Set(&smithy.GenericAPIError{Code: "UnauthorizedOperation", Message: "nope"})
+			err := provider.Reboot(ctx, nodeClaim, operationID)
+			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeTrue())
+		})
+		It("should retry a plain reboot that fails transiently without trying the swap again", func() {
+			target(newStandardAMI).Name = eksImageName("standard", 34, "v2")
+			apply()
+			awsEnv.EC2API.RebootInstancesBehavior.Error.Set(&smithy.GenericAPIError{Code: "RequestLimitExceeded"})
+			err := provider.Reboot(ctx, nodeClaim, operationID)
+			Expect(err).To(HaveOccurred())
+			Expect(corecloudprovider.IsNodeRebootFailedError(err)).To(BeFalse())
+			// The retry, even after the gate stops failing, reboots plainly.
+			target(newStandardAMI).Name = eksImageName("standard", 33, "v2")
+			apply()
+			Expect(provider.Reboot(ctx, nodeClaim, operationID)).To(Succeed())
+			Expect(rootVolumes.CreateCalls).To(BeEmpty())
 		})
 	})
 })
