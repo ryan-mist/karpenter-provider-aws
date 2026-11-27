@@ -6,50 +6,34 @@ description: >
   Recommended service-level objectives, alerts, and dashboards for running Karpenter on AWS
 ---
 
-Karpenter sits on the critical path of your cluster's capacity. When it can't launch nodes, pods stay
-`Pending`. When it disrupts nodes too fast, or in a way you didn't expect, workloads lose capacity.
-When it can't finish terminating nodes, you pay for idle instances and rollouts stall. Most of these
-failures don't crash Karpenter. The controller keeps running, its health probes stay green, and the
-first person to notice is usually a workload owner asking why their pods aren't running, sometimes
-hours or days later.
+Most Karpenter failures don't crash the controller. When Karpenter can't launch nodes, disrupts them
+faster than you expect, or can't finish terminating them, it keeps running and its health probes
+stay green. Without monitoring, a workload owner is usually the first to notice.
 
-This page describes a recommended monitoring setup for self-managed Karpenter on Amazon EC2:
+This page is Karpenter's **recommended** monitoring setup for self-managed Karpenter on Amazon EC2.
+Use it as a starting point and tune the thresholds to your cluster's size and tolerance for noise. If
+you monitor something that isn't covered here, please [open an issue](https://github.com/aws/karpenter-provider-aws/issues/new/choose)
+or a pull request so we can expand this page.
 
-* [What to collect](#collecting-signals): metrics, Kubernetes Events, and logs
+The page covers:
+
+* [What to collect](#collecting-signals)
 * [Service-level objectives](#service-level-objectives) to track over time
 * [Alerts](#alerts), split into alerts that should page someone and alerts that should open a ticket
-* [Forceful termination after `terminationGracePeriod`](#detecting-forceful-termination-after-terminationgraceperiod), which is easy to forget and catches many misconfigurations
+* [Forceful termination after `terminationGracePeriod`](#detecting-forceful-termination-after-terminationgraceperiod)
 * [Metrics that are easy to misread](#metrics-that-are-easy-to-misread)
-* [Failure modes that have no metric today](#failure-modes-without-a-direct-metric), and how to cover them
-* [Operational practices](#operational-practices), for example what to watch after an upgrade
+* [Failure modes that have no metric today](#failure-modes-without-a-direct-metric)
+* [Operational practices](#operational-practices)
 
-The queries on this page are PromQL. They use metrics documented in the [Metrics reference]({{< relref "../reference/metrics" >}}).
-The thresholds are starting points: tune them to your cluster's size, scaling patterns, and
-tolerance for noise. For Amazon EC2 API call volume and throttling, see also
-[Monitoring Amazon EC2 API Usage]({{< relref "./monitoring-ec2-api-usage" >}}).
-
-{{% alert title="Note" color="primary" %}}
-This page is about self-managed Karpenter. In EKS Auto Mode, AWS runs Karpenter for you and its
-`/metrics` endpoint and controller logs aren't available to you. The Kubernetes-side signals on this
-page, such as pod `Pending` age, Node conditions, NodeClaim conditions and Events, still apply.
-{{% /alert %}}
+The queries are PromQL and use the metrics in the [Metrics reference]({{< relref "../reference/metrics" >}}).
+For Amazon EC2 API call volume and throttling, see [Monitoring Amazon EC2 API Usage]({{< relref "./monitoring-ec2-api-usage" >}}).
 
 ## Collecting signals
 
-You need three kinds of signal. Metrics alone aren't enough: some important behaviors, including
-forceful termination after `terminationGracePeriod`, are only reported as Kubernetes Events.
-
 ### Metrics
 
-Karpenter serves Prometheus metrics over plain HTTP at `:8080/metrics` (set with `METRICS_PORT`). The
-Helm chart creates a `Service` with a port named `http-metrics`. If you run the Prometheus Operator,
-enable the chart's `ServiceMonitor`, which is off by default:
-
-```yaml
-serviceMonitor:
-  enabled: true
-  # additionalLabels, endpointConfig, metricRelabelings, relabelings, and sampleLimit are also supported
-```
+Metrics are the basis for every alert on this page. Karpenter serves Prometheus metrics at
+`:8080/metrics`, and the Helm chart includes an optional `ServiceMonitor` (`serviceMonitor.enabled`).
 
 Keep these points in mind:
 
@@ -57,57 +41,44 @@ Keep these points in mind:
   only run on the elected leader, so Karpenter-specific metrics only move on the leader. Aggregate
   across pods with `sum` or `max` instead of alerting per pod. Where a stale series from a former
   leader could mask a problem, join on `leader_election_master_status == 1`.
-* **Don't disable cluster state observability if you want these alerts.** Setting
-  `settings.disableClusterStateObservability` (`DISABLE_CLUSTER_STATE_OBSERVABILITY`) turns off the
-  pod, node, and NodePool metrics controllers and **all** `operator_*` status-condition metrics.
-  Several alerts on this page depend on them.
+* **Cluster state observability.** At high scale you may set `settings.disableClusterStateObservability`
+  to reduce Karpenter's resource use. This turns off the pod, node, and NodePool metrics and the
+  `operator_*` status-condition metrics, which several alerts on this page rely on.
 * **Manage cardinality instead of turning off scraping.** The largest series counts come from
   `karpenter_cloudprovider_instance_type_offering_available`,
-  `karpenter_cloudprovider_instance_type_offering_price_estimate` (one series per instance type,
-  capacity type, and zone), `karpenter_pods_state` (one series per pod), and the `karpenter_nodes_*`
-  gauges (one series per node and resource). If they're too expensive, drop them with
-  `metricRelabelings` rather than disabling scraping and losing your alerts.
-* **If you export to Amazon CloudWatch**, counters typically arrive as per-period deltas. Use the
-  `Sum` statistic, not `Max` or `Average`. Make sure the cluster name is a dimension, so that alarms
-  from several clusters don't merge.
+  `karpenter_cloudprovider_instance_type_offering_price_estimate`, `karpenter_pods_state`, and the
+  `karpenter_nodes_*` gauges. If they're too expensive, drop them with `metricRelabelings` rather
+  than disabling scraping and losing your alerts.
 
-Also collect the standard [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics)
-and cAdvisor metrics for the Karpenter Deployment and pods: restarts, `OOMKilled` terminations, CPU
-throttling, and memory working set relative to the limit.
+### Events and logs
 
-### Kubernetes Events
+Kubernetes Events and controller logs are mainly for debugging: they explain *why* an alert fired.
+Export both to a durable store, because Events expire from the API server after an hour by default
+and logs often rotate before an investigation starts. Karpenter publishes Node and NodeClaim Events
+in the `default` namespace.
 
-Karpenter reports many decisions only as Events on Pods, Nodes, NodeClaims, and NodePools:
+Events that help explain alerts:
 
 | Event reason | Object | Meaning |
 |---|---|---|
-| `Disrupted` (with message `... This bypasses the PDB of the pod and the do-not-disrupt annotation.`) | Pod | Karpenter deleted the pod because its node's `terminationGracePeriod` was about to expire. See [below](#detecting-forceful-termination-after-terminationgraceperiod). |
+| `Disrupted` (message ends `This bypasses the PDB of the pod and the do-not-disrupt annotation.`) | Pod | Karpenter deleted the pod because its node's `terminationGracePeriod` was about to expire. |
 | `TerminationGracePeriodExpiring` | Node, NodeClaim | A termination deadline is set: "All pods will be deleted by `<time>`". |
 | `FailedDraining` | Node | Draining is blocked, for example because evicting a pod would violate a PDB. |
 | `DisruptionBlocked`, `Unconsolidatable` | Node, NodeClaim, NodePool | Karpenter wanted to disrupt a node but couldn't, for example because of `karpenter.sh/do-not-disrupt`, PDBs, or a budget. |
 | `InsufficientCapacityError` | NodeClaim, Pod | A launch failed because no requested offering had capacity. |
 | `NodeClassNotReady` | NodeClaim | A launch was skipped because the NodeClaim's EC2NodeClass isn't ready. |
 
-Events expire from the API server after an hour by default, so export them to a durable store with
-an event exporter, the Amazon CloudWatch Container Insights event pipeline, or your log pipeline,
-and alert on them there. Karpenter emits Node and NodeClaim events in the `default` namespace, so
-route them to the platform team, not to workload owners.
+A few conditions are only visible in Events or logs today, so you may want to alert on them until a
+metric exists:
 
-### Logs
+* Pods force-deleted after `terminationGracePeriod` (the `Disrupted` Pod Event). See [below](#detecting-forceful-termination-after-terminationgraceperiod).
+* The log line `karpenter is not compatible with kubernetes version`: the controller keeps running
+  and looks healthy, but won't work correctly on this cluster version.
+* The log line `exceed limits for nodepool`: provisioning is blocked by NodePool `limits`.
 
-Ship Karpenter controller logs to a durable store, such as Amazon CloudWatch Logs, with retention of
-at least a few weeks. Logs often rotate before an investigation starts. Karpenter logs at `info`
-by default. Some useful lines, such as the per-pod force-delete message (`deleting pod`) and
-liveness timeouts (`terminating due to timeout`), are only logged at `debug`. Know how to switch the
-log level (`logLevel` in the Helm chart) before you need to.
-
-Useful log-based alerts:
-
-* `karpenter is not compatible with kubernetes version`: the controller keeps running and looks
-  healthy, but won't work correctly on this cluster version.
-* `cluster is waiting on sync for extended duration`: see [cluster state not synced](#critical-alerts).
-* `exceed limits for nodepool`: provisioning is blocked by NodePool `limits`.
-* Any `ERROR` line mentioning `UnauthorizedOperation`, `AccessDenied`, or `AuthFailure`.
+Some useful log lines, such as the per-pod force-delete message (`deleting pod`) and liveness
+timeouts (`terminating due to timeout`), are only logged at `debug`. Know how to switch `logLevel`
+before you need to.
 
 ## Service-level objectives
 
