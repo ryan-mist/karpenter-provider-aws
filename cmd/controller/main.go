@@ -16,6 +16,7 @@ package main
 
 import (
 	"github.com/samber/lo"
+	"sigs.k8s.io/karpenter/pkg/controllers/nodeclaim/lifecycle/launched"
 
 	v1 "github.com/aws/karpenter-provider-aws/pkg/apis/v1"
 	"github.com/aws/karpenter-provider-aws/pkg/cloudprovider"
@@ -59,6 +60,8 @@ func main() {
 		v1.CapacityReservationsEnabled = true
 	}
 
+	launchedRegistry := launched.NewRegistry()
+
 	op.
 		WithControllers(ctx, corecontrollers.NewControllers(
 			ctx,
@@ -71,6 +74,7 @@ func main() {
 			clusterState,
 			op.InstanceTypeStore,
 			op.PredictionStore,
+			corecontrollers.WithLaunchedRegistry(launchedRegistry),
 			corecontrollers.WithRegistrationHook(registrationhooks.NewPlacementGroupRegistrationHook(op.InstanceProvider)),
 			corecontrollers.WithVPAPrediction(),
 		)...).
@@ -103,6 +107,7 @@ func main() {
 			op.InstanceStatusProvider,
 			op.CABundle,
 			op.CELEnvironment,
+			launchedRegistry,
 		)...).
 		Start(ctx)
 }
